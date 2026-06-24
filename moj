@@ -39,6 +39,14 @@ api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die)
 http_code(){ local m="$1" p="$2" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
   curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
 need_login(){ [[ -f "$TOKENF" ]] || die "faça 'moj login' primeiro."; }
+api_post_file(){ # api_post_file PATH BODYFILE  -> POST grande (corpo via arquivo; evita ARG_MAX)
+  local p="$1" f="$2" auth=() out code tmp; tmp="$(mktemp)"
+  [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
+  code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X POST -H 'Content-Type: application/json' --data-binary @"$f" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
+  out="$(cat "$tmp")"; rm -f "$tmp"
+  [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
+  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
+}
 enc(){ jq -rn --arg s "$1" '$s|@uri'; }
 slurp(){ [[ -f "$1" ]] && jq -Rs . < "$1" || printf '""'; }
 pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
@@ -154,10 +162,17 @@ cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arqui
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
 cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(tar.gz|tar.bz2|tar.zst|zip)>"
   [[ -f "$2" ]] || die "arquivo não encontrado: $2"
-  api POST "/problems/upload" "$(jq -n --arg id "$1" --arg t "$(base64 -w0 < "$2")" '{id:$id,tar_b64:$t}')" | jq -r '"enviado: \(.id)  sha \(.sha)"'; }
+  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; base64 -w0 < "$2" > "$b64"
+  jq -n --arg id "$1" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
+  api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_export(){ need_login; [[ $# -ge 1 ]] || die "uso: moj export <id> [arquivo.tar.gz]   (pacote ICPC/Kattis)"
   local id="$1" out="${2:-${1##*#}.icpc.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/export?id=$(enc "$id")" -o "$out" || die "falha ao exportar"; echo "exportado (ICPC/Kattis): $out"; }
+cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz|zip)> <pasta> [prob]   (ICPC/Kattis -> MOJ)"
+  [[ -f "$1" ]] || die "arquivo não encontrado: $1"
+  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; base64 -w0 < "$1" > "$b64"
+  jq -n --arg r "$2" --arg p "${3:-}" --rawfile t "$b64" '{repo:$r, prob:(if $p=="" then null else $p end), tar_b64:$t}' > "$bf"
+  api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
   local body; body="$(jq -c '{enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
@@ -271,7 +286,7 @@ case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
-  preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";;
+  preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";;
   help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
