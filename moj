@@ -59,9 +59,10 @@ _cat(){ local d="$1" c="$2" out='[' first=1 f
     [[ $first -eq 1 ]] || out+=','; first=0
     out+="$(jq -n --arg fn "$(basename "$f")" --rawfile code "$f" '{filename:$fn,code:$code}')"
   done; shopt -u nullglob; printf '%s]' "$out"; }
-pkg_to_json(){ local d="$1" enunf=""
-  local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; break; }; done
-  jq -n --argjson enun "$(slurp "$enunf")" --argjson conf "$(slurp "$d/conf")" \
+enun_path(){ local e; for e in md org tex; do [[ -f "$1/docs/enunciado.$e" ]] && { printf '%s' "$1/docs/enunciado.$e"; return; }; done; printf '%s' "$1/docs/enunciado.md"; }
+pkg_to_json(){ local d="$1" enunf="" efmt=md
+  local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; case "$ef" in *.org) efmt=org;; *.tex) efmt=tex;; *) efmt=md;; esac; break; }; done
+  jq -n --argjson enun "$(slurp "$enunf")" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
@@ -69,11 +70,12 @@ pkg_to_json(){ local d="$1" enunf=""
         --argjson exs "$(_pairs "$d" sample)" --argjson tss "$(_pairs "$d" hidden)" \
         --argjson good "$(_cat "$d" good)" --argjson slow "$(_cat "$d" slow)" --argjson wrong "$(_cat "$d" wrong)" \
         --argjson pass "$(_cat "$d" pass)" --argjson up "$(_cat "$d" upcoming)" '
-    {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, conf_text:$conf,
-     examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}'; }
+    {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
+     conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}'; }
 json_to_pkg(){ local j="$1" d="$2" id="$3"
   mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output"
-  jq -r '.enunciado_md // ""' <<<"$j" > "$d/docs/enunciado.md"
+  local efmt; efmt="$(jq -r '.format // .enunciado_format // "md"' <<<"$j")"; [[ "$efmt" =~ ^(md|org|tex)$ ]] || efmt=md
+  jq -r '.enunciado_md // ""' <<<"$j" > "$d/docs/enunciado.$efmt"
   jq -r '.author // ""' <<<"$j" > "$d/author"
   jq -r '(.tags // [])[]' <<<"$j" > "$d/tags"
   jq -r '.conf_text // "TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y"' <<<"$j" > "$d/conf"
@@ -81,8 +83,8 @@ json_to_pkg(){ local j="$1" d="$2" id="$3"
   while IFS= read -r p; do nm="$(jq -r '.name//empty' <<<"$p")"; [[ -n "$nm" ]] || continue; jq -r '.input' <<<"$p" > "$d/tests/input/$nm"; jq -r '.output' <<<"$p" > "$d/tests/output/$nm"; done < <(jq -c '(.tests//[])[]' <<<"$j")
   local cat s fn; for cat in good slow wrong pass upcoming; do mkdir -p "$d/sols/$cat"
     while IFS= read -r s; do fn="$(jq -r '.filename' <<<"$s")"; [[ -n "$fn" ]] && jq -r '.code' <<<"$s" > "$d/sols/$cat/$fn"; done < <(jq -c --arg c "$cat" '(.sols[$c]//[])[]' <<<"$j"); done
-  jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --argjson s "$j" \
-    '{id:$id, repo:$r, prob:$p, title:($s.title//""), collections:($s.collections//[]), public:($s.public//false)}' > "$d/.moj-id"; }
+  jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --argjson s "$j" \
+    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), public:($s.public//false)}' > "$d/.moj-id"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
 conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
@@ -153,8 +155,8 @@ cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arqui
 cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(tar.gz|tar.bz2|tar.zst|zip)>"
   [[ -f "$2" ]] || die "arquivo não encontrado: $2"
   api POST "/problems/upload" "$(jq -n --arg id "$1" --arg t "$(base64 -w0 < "$2")" '{id:$id,tar_b64:$t}')" | jq -r '"enviado: \(.id)  sha \(.sha)"'; }
-cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -f "$d/docs/enunciado.md" ]] || die "rode dentro de um problema."
-  local body; body="$(jq -c '{enunciado_md, examples}' <<<"$(pkg_to_json "$d")")"
+cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
+  local body; body="$(jq -c '{enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
@@ -249,7 +251,7 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
       1) mid_set "$D" --arg t "$(ask '  Título: ' "$(mid "$D" title)")" '.title=$t';;
       2) ask '  Autor: ' "$(head -1 "$D/author" 2>/dev/null)" > "$D/author";;
       3) ask '  Tags (vírgula): ' "$(paste -sd, "$D/tags" 2>/dev/null)" | tr ',' '\n' | sed '/^[[:space:]]*$/d;s/^[[:space:]]*//;s/[[:space:]]*$//' > "$D/tags";;
-      4) "$ED" "$D/docs/enunciado.md" </dev/tty;;
+      4) "$ED" "$(enun_path "$D")" </dev/tty;;
       5) edit_examples "$D";; 6) edit_tests "$D";; 7) edit_sols "$D";; 8) edit_conf "$D";; 9) edit_colls "$D";;
       0) local p; p="$(mid "$D" public)"; [[ "$p" == true ]] && p=false || p=true; mid_set "$D" --argjson p "$p" '.public=$p'; echo "  (aplica no próximo 'salvar')";;
       r) local act u; act="$(ask '  [a]dd ou [r]emove colaborador? ')"; u="$(ask '  login: ')"; [[ -n "$u" ]] && { [[ "$act" == r ]] && cmd_unshare "$(mid "$D" repo)" "$u" || cmd_share "$(mid "$D" repo)" "$u"; };;
