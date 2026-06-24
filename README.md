@@ -1,79 +1,86 @@
 # moj — CLI de autoria de problemas do MOJ
 
 Crie e edite problemas do MOJ **sem git e sem chave SSH**. Você só precisa do seu **login do
-MOJ**. Trabalhe os arquivos localmente (texto comum) e o `moj` cuida do resto pela API — o
-servidor faz o git por baixo (Gitea atrás), commitando como você.
+MOJ**. Dois jeitos de trabalhar (acesso a **tudo** que a página web tem):
+
+- **Editor interativo** (como preencher os campos da página): `moj edit <id|pasta>`
+- **Arquivos locais** (use seu editor favorito): `moj clone <id>` → edite os arquivos → `moj push`
 
 ## Instalação
 
-Precisa só de `bash`, `curl` e `jq`. Baixe o script e ponha no PATH:
+Precisa de `bash`, `curl`, `jq` (e um editor para `moj edit`, via `$EDITOR`). Baixe e ponha no PATH:
 
 ```bash
 curl -fsSL https://moj.naquadah.com.br/moj -o ~/.local/bin/moj && chmod +x ~/.local/bin/moj
 ```
 
-Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`). Para testar contra um
-servidor local: `export MOJ_URL=http://127.0.0.1:8080 MOJ_HOST=moj.charge.naquadah.com.br`.
+Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`. Para testar local:
+`export MOJ_URL=http://127.0.0.1:8080 MOJ_HOST=moj.charge.naquadah.com.br`.
 
-## Uso rápido
+## Editor interativo (recomendado)
 
 ```bash
-moj login                       # seu login + senha do MOJ (guarda um token em ~/.config/moj)
-moj mkdir meus-problemas        # cria uma "pasta" (diretório) sua
-moj new meus-problemas soma     # scaffold de um problema novo em ./soma
-$EDITOR soma/docs/enunciado.md  # edite o enunciado (Markdown canônico)
-#   ... edite tests/input|output/sample*, sols/good/sol.py, tags, author ...
-moj test soma                   # pré-voo local (enunciado + exemplos + solução)
-moj push soma                   # envia (cria/edita); commit autorado por você
-moj publish meus-problemas#soma # valida no juiz e, passando, entra no treino livre
-moj status meus-problemas#soma  # vê o relatório de validação (o portão)
+moj login
+moj edit competicao#meu-problema     # clona (se preciso) e abre o menu
 ```
+
+O menu espelha os campos da página — escolha um número/letra para editar:
+
+```
+── Editando competicao#meu-problema  (pasta ./meu-problema) ──
+  1) Título     2) Autor     3) Tags
+  4) Enunciado (abre o $EDITOR)   5) Exemplos (N)   6) Testes ocultos (M)
+  7) Soluções (good/wrong/slow/pass/upcoming)   8) Conf   9) Coleções
+  0) Público    r) Compartilhar pasta    v) Pré-visualizar
+  w) SALVAR (push)   P) Validar & Publicar   i) Info/validação   q) Sair
+```
+
+Enunciado e código de solução abrem no seu `$EDITOR`; título/autor/tags são campos editáveis;
+exemplos/testes/soluções têm submenus de adicionar/editar/remover; `conf` tem atalhos para as
+opções comuns (calibrafactor, ULIMITS, CALIBRATIONTL, ALLOWPARALLELTEST, STOPWHEN…) + edição
+bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
 
 ## Comandos
 
 | Comando | O que faz |
 |---|---|
-| `moj login` / `logout` / `whoami` | sessão (token em `~/.config/moj/token`, modo 600) |
-| `moj repos` | suas pastas (dono ou compartilhadas) |
-| `moj ls [mine\|shared\|public]` | lista problemas |
-| `moj mkdir <pasta>` | cria uma pasta (repo no seu namespace) |
-| `moj new <pasta> <prob>` | scaffold de um problema canônico em `./<prob>` |
-| `moj clone <id> [dir]` | baixa o source de um problema p/ editar local |
-| `moj test [dir]` | pré-voo local (o portão autoritativo é no `publish`) |
-| `moj push [dir] [--force]` | envia; **só sobe o que passa no pré-voo** (`--force` = rascunho privado) |
-| `moj publish <id>` / `unpublish <id>` | torna público (valida no juiz) / despublica |
-| `moj calibrate <id>` | pede calibração (gera os time limits no juiz) |
-| `moj status <id>` | relatório de validação (checks do portão) |
-| `moj share <pasta> <login>` / `unshare …` | compartilha a pasta com um colega |
+| `moj login` / `logout` / `whoami` | sessão (mostra se você pode criar problemas) |
+| `moj edit <id\|dir>` | **editor interativo** (campos da página) |
+| `moj ls [mine\|shared\|public]` · `moj repos` | listas |
+| `moj info <id>` | tudo do problema (dono, público, coleções, validação, contagens) |
+| `moj new <pasta> <prob>` | scaffold completo do pacote em `./<prob>` |
+| `moj clone <id> [dir]` | baixa o pacote **inteiro** (enunciado, conf, exemplos, testes, todas as soluções) |
+| `moj test [dir]` · `moj push [dir] [--force]` | pré-voo local · envia (cria/edita) |
+| `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
+| `moj download <id> [arq]` · `moj upload <id> <arq>` | baixa/sobe o pacote `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
+| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar/calibrar |
+| `moj status [<id>]` | status do sistema (juízes/fila) ou a validação de um problema |
+| `moj mkdir <pasta>` · `moj share <pasta> <login>` / `unshare …` | pastas e compartilhamento |
+| `moj collection ls` | coleções (setters, admins, quais você gerencia) |
+| `moj collection create <nome> [--members a,b] [--admins c,d]` | cria coleção (competição/curso) |
+| `moj collection members <nome> [--add] [--remove] [--admins-add] [--admins-remove]` | gerencia o grupo |
 
-## Formato do problema (pacote canônico)
+## Pacote do problema (arquivos)
 
 ```
 <prob>/
-  docs/enunciado.md     # % Título · descrição · ## Entrada · ## Saída · ## Observações
-  author                # autor(es) — texto livre
-  tags                  # uma tag por linha
-  conf                  # ULIMITS/TLMOD (opcional)
-  tests/input/sample1   # exemplos (sample*) — ficam SEMPRE visíveis no enunciado
-  tests/output/sample1
-  tests/input/2         # testes ocultos (qualquer nome != sample*)
-  sols/good/sol.py      # solução de referência (precisa ser ACEITA p/ publicar)
-  .moj-id               # {id, repo, prob, title} — gerado pelo new/clone
+  docs/enunciado.md     # % Título · ## Entrada · ## Saída · ## Observações
+  conf                  # TL/ulimits/STOPWHEN… (atalhos no 'moj edit', opção 8)
+  author · tags
+  tests/input|output/sample1   # exemplos (aparecem no enunciado)
+  tests/input|output/<nome>    # testes ocultos
+  sols/good|wrong|slow|pass|upcoming/<arquivo>   # soluções por categoria
+  .moj-id               # ponteiro local (id/repo/prob/título/coleções) — não é enviado
 ```
 
-Os **exemplos** são injetados no enunciado a partir de `tests/input|output/sample*` — não os
-escreva à mão no Markdown; assim eles batem sempre com os testes reais.
+## Quem pode criar
+
+Criar problemas/pastas/coleções segue a **mesma permissão de criar contests** (admin do treino
+libera por usuário ou por nº de problemas resolvidos). `moj whoami` mostra se você pode; editar e
+compartilhar problemas existentes funciona para quem é dono/colaborador.
 
 ## Portão de qualidade
 
-`moj push` faz um **pré-voo local** (enunciado, ≥1 exemplo, solução `good` presente). O portão
-**autoritativo** roda no servidor quando você dá `moj publish`: 1 juiz valida que o **HTML
-compila**, os **exemplos aparecem** e a **solução `good` é aceita**. Só então o problema entra no
-treino livre. Rascunho quebrado fica na sua pasta **privada** (use `--force` p/ subir mesmo assim);
-**nunca** vai a público sem passar.
-
-## Modo git (avançado, opcional)
-
-O fluxo acima é 100% sem git. Quem quiser usar git de verdade pode pedir uma credencial HTTPS
-efêmera (`POST /problems/git-credential`) e clonar/pushar direto do Gitea — requer que o Gitea
-esteja alcançável pelo cliente (ver `cdmoj/docs/DEPLOY-GITEA.md`). Para a maioria, **não precisa**.
+`moj push` faz pré-voo local (enunciado, ≥1 exemplo, solução `good`). O portão **autoritativo**
+roda no servidor em `moj publish` (1 juiz valida HTML+exemplos+`good` aceita). Só então entra no
+treino livre; rascunho quebrado fica privado (`--force`).

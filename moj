@@ -1,196 +1,274 @@
 #!/usr/bin/env bash
-# moj — CLI de autoria de problemas do MOJ. SEM git, SEM chave: você só usa seu LOGIN do MOJ.
-# Trabalhe os problemas localmente (arquivos comuns) e o `moj` cuida do resto pela API.
+# moj — CLI de autoria de problemas do MOJ. SEM git, SEM chave: só o seu LOGIN do MOJ.
+# Dois jeitos de trabalhar:
+#   • EDITOR INTERATIVO (como os campos da página):   moj edit <id|pasta>
+#   • ARQUIVOS LOCAIS (edite com seu editor favorito): moj clone <id> ; … ; moj push
+#
 #   moj login | whoami | logout
-#   moj ls [mine|shared|public]      moj repos       moj mkdir <pasta>
-#   moj new <pasta> <prob>           moj clone <id>  moj open <id>
-#   moj test [dir]                   moj push [dir] [--force]
-#   moj publish <id> | unpublish <id>   moj calibrate <id>   moj status <id>
-#   moj share <pasta> <login> | unshare <pasta> <login>
-# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local).
+#   moj ls [mine|shared|public]   moj repos   moj mkdir <pasta>   moj status [<id>]
+#   moj new <pasta> <prob>        moj clone <id> [dir]            moj info <id>
+#   moj edit <id|dir>             moj test [dir]                  moj push [dir] [--force]
+#   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
+#   moj public <id> on|off        moj publish <id>                moj calibrate <id>
+#   moj share <pasta> <login>     moj unshare <pasta> <login>
+#   moj collection ls | create <nome> [--members a,b] [--admins c]
+#                  | members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]
+# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local),
+#         EDITOR (editor de texto; default nano/vi).
 set -euo pipefail
 
 MOJ_URL="${MOJ_URL:-https://moj.naquadah.com.br}"
 CONTEST="${MOJ_CONTEST:-treino}"
 CFG="${MOJ_CONFIG_DIR:-$HOME/.config/moj}"
 TOKENF="$CFG/token"
+ED="${EDITOR:-${VISUAL:-}}"; [[ -n "$ED" ]] || { command -v nano >/dev/null && ED=nano || ED=vi; }
 HDR=(); [[ -n "${MOJ_HOST:-}" ]] && HDR=(-H "Host: $MOJ_HOST")
 die(){ printf 'moj: %s\n' "$*" >&2; exit 1; }
 have(){ command -v "$1" >/dev/null 2>&1; }
-have jq   || die "preciso do 'jq' instalado."
-have curl || die "preciso do 'curl' instalado."
+have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
 
-api(){ # api METHOD PATH [json-body]  -> corpo JSON no stdout (erro -> die com mensagem da API)
-  local m="$1" p="$2" data="${3:-}" auth=() out code
+api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die)
+  local m="$1" p="$2" data="${3:-}" auth=() out code tmp; tmp="$(mktemp)"
   [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  local tmp; tmp="$(mktemp)"
-  if [[ -n "$data" ]]; then
-    code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" \
-      -H 'Content-Type: application/json' --data "$data" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
-  else
-    code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" \
-      "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
-  fi
+  if [[ -n "$data" ]]; then code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data "$data" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
+  else code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"; fi
   out="$(cat "$tmp")"; rm -f "$tmp"
-  if [[ "$code" =~ ^2 ]]; then printf '%s' "$out"; return 0; fi
-  local msg; msg="$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null)"
-  die "${msg:-HTTP $code} ${code:+($code)}"
+  [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
+  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
 }
+http_code(){ local m="$1" p="$2" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
+  curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
 need_login(){ [[ -f "$TOKENF" ]] || die "faça 'moj login' primeiro."; }
-http_code(){ # http_code METHOD PATH [body] -> só o código HTTP (NÃO morre; p/ probes)
-  local m="$1" p="$2" data="${3:-}" auth=()
-  [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  if [[ -n "$data" ]]; then
-    curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data "$data" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000
-  else
-    curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000
-  fi
-}
-
-# ---- materialização local <-> JSON --------------------------------------------------------
+enc(){ jq -rn --arg s "$1" '$s|@uri'; }
 slurp(){ [[ -f "$1" ]] && jq -Rs . < "$1" || printf '""'; }
-pkg_to_json(){ # <dir> -> body JSON {title,author,tags,collections,enunciado_md,examples,tests,good_sol}
-  local d="$1" enun="" ef
-  for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enun="$d/$ef"; break; }; done
-  local tags='[]'; [[ -f "$d/tags" ]] && tags="$(jq -R . "$d/tags" | jq -sc .)"
-  local title=""; [[ -f "$d/.moj-id" ]] && title="$(jq -r '.title // ""' "$d/.moj-id" 2>/dev/null)"
-  local colls='[]'; [[ -f "$d/.moj-id" ]] && colls="$(jq -c '.collections // []' "$d/.moj-id" 2>/dev/null)"
-  local exs tss good='[]'
-  exs="$(_pairs "$d" sample)"; tss="$(_pairs "$d" hidden)"
-  local gf; gf="$(find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | head -1)"
-  [[ -n "$gf" ]] && good="$(jq -n --arg fn "$(basename "$gf")" --rawfile c "$gf" '[{filename:$fn, code:$c}]')"
-  jq -n --rawfile enun "${enun:-/dev/null}" --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
-        --argjson tags "$tags" --argjson colls "$colls" --arg title "$title" \
-        --argjson exs "$exs" --argjson tss "$tss" --argjson good "$good" '
-    {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun,
-     examples:$exs, tests:$tss} + ($good[0] // {} | if .filename then {good_sol:.} else {} end)'
-}
-_pairs(){ # <dir> <sample|hidden> -> [{input,output}]
-  local d="$1" w="$2" out='[' first=1 inp nm op
+pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
+ask(){ local p="$1" def="${2:-}" v; read -e -i "$def" -r -p "$p" v </dev/tty || true; printf '%s' "$v"; }
+
+# ---- pacote <-> JSON (fidelidade total) ---------------------------------------------------
+_pairs(){ local d="$1" w="$2" out='[' first=1 inp nm op
   shopt -s nullglob
   for inp in "$d/tests/input"/*; do nm="$(basename "$inp")"
     if [[ "$w" == sample ]]; then [[ "$nm" == sample* ]] || continue; else [[ "$nm" == sample* ]] && continue; fi
     op="$d/tests/output/$nm"; [[ -f "$op" ]] || op=/dev/null
     [[ $first -eq 1 ]] || out+=','; first=0
-    out+="$(jq -n --rawfile i "$inp" --rawfile o "$op" '{input:$i, output:$o}')"
-  done; shopt -u nullglob; printf '%s]' "$out"
-}
-json_to_pkg(){ # <json> <dir>  (escreve o pacote local a partir do source da API)
-  local j="$1" d="$2"
-  mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output" "$d/sols/good"
+    out+="$(jq -n --arg nm "$nm" --rawfile i "$inp" --rawfile o "$op" '{name:$nm,input:$i,output:$o}')"
+  done; shopt -u nullglob; printf '%s]' "$out"; }
+_cat(){ local d="$1" c="$2" out='[' first=1 f
+  shopt -s nullglob
+  for f in "$d/sols/$c"/*; do [[ -f "$f" ]] || continue
+    [[ $first -eq 1 ]] || out+=','; first=0
+    out+="$(jq -n --arg fn "$(basename "$f")" --rawfile code "$f" '{filename:$fn,code:$code}')"
+  done; shopt -u nullglob; printf '%s]' "$out"; }
+pkg_to_json(){ local d="$1" enunf=""
+  local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; break; }; done
+  jq -n --argjson enun "$(slurp "$enunf")" --argjson conf "$(slurp "$d/conf")" \
+        --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
+        --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
+        --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
+        --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
+        --argjson exs "$(_pairs "$d" sample)" --argjson tss "$(_pairs "$d" hidden)" \
+        --argjson good "$(_cat "$d" good)" --argjson slow "$(_cat "$d" slow)" --argjson wrong "$(_cat "$d" wrong)" \
+        --argjson pass "$(_cat "$d" pass)" --argjson up "$(_cat "$d" upcoming)" '
+    {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, conf_text:$conf,
+     examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}'; }
+json_to_pkg(){ local j="$1" d="$2" id="$3"
+  mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output"
   jq -r '.enunciado_md // ""' <<<"$j" > "$d/docs/enunciado.md"
-  jq -r '.author // ""'       <<<"$j" > "$d/author"
-  jq -r '(.tags // [])[]'     <<<"$j" > "$d/tags"
-  jq -r '.conf_text // "ULIMITS[-u]=10000\nALLOWPARALLELTEST=y"' <<<"$j" > "$d/conf"
-  local i=0; while IFS= read -r p; do i=$((i+1))
-    jq -r '.input'  <<<"$p" > "$d/tests/input/sample$i"; jq -r '.output' <<<"$p" > "$d/tests/output/sample$i"
-  done < <(jq -c '(.examples // [])[]' <<<"$j")
-  while IFS= read -r p; do local nm; nm="$(jq -r '.name // empty' <<<"$p")"; [[ -n "$nm" ]] || continue
-    jq -r '.input' <<<"$p" > "$d/tests/input/$nm"; jq -r '.output' <<<"$p" > "$d/tests/output/$nm"
-  done < <(jq -c '(.tests // [])[]' <<<"$j")
-  while IFS= read -r s; do local fn; fn="$(jq -r '.filename' <<<"$s")"
-    jq -r '.code' <<<"$s" > "$d/sols/good/$fn"
-  done < <(jq -c '(.sols.good // [])[]' <<<"$j")
-}
+  jq -r '.author // ""' <<<"$j" > "$d/author"
+  jq -r '(.tags // [])[]' <<<"$j" > "$d/tags"
+  jq -r '.conf_text // "TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y"' <<<"$j" > "$d/conf"
+  local i=0 p nm; while IFS= read -r p; do i=$((i+1)); jq -r '.input' <<<"$p" > "$d/tests/input/sample$i"; jq -r '.output' <<<"$p" > "$d/tests/output/sample$i"; done < <(jq -c '(.examples//[])[]' <<<"$j")
+  while IFS= read -r p; do nm="$(jq -r '.name//empty' <<<"$p")"; [[ -n "$nm" ]] || continue; jq -r '.input' <<<"$p" > "$d/tests/input/$nm"; jq -r '.output' <<<"$p" > "$d/tests/output/$nm"; done < <(jq -c '(.tests//[])[]' <<<"$j")
+  local cat s fn; for cat in good slow wrong pass upcoming; do mkdir -p "$d/sols/$cat"
+    while IFS= read -r s; do fn="$(jq -r '.filename' <<<"$s")"; [[ -n "$fn" ]] && jq -r '.code' <<<"$s" > "$d/sols/$cat/$fn"; done < <(jq -c --arg c "$cat" '(.sols[$c]//[])[]' <<<"$j"); done
+  jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --argjson s "$j" \
+    '{id:$id, repo:$r, prob:$p, title:($s.title//""), collections:($s.collections//[]), public:($s.public//false)}' > "$d/.moj-id"; }
 
-# ---- comandos -----------------------------------------------------------------------------
-cmd_login(){
-  mkdir -p "$CFG"; chmod 700 "$CFG"
+# conf get/set por chave (bash; chave entre aspas -> [ ] literais)
+conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
+conf_set(){ local d="$1" k="$2" v="$3" line found=0 tmp; tmp="$(mktemp)"
+  [[ -f "$d/conf" ]] && while IFS= read -r line; do if [[ "$line" == "$k="* ]]; then [[ -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; found=1; else printf '%s\n' "$line" >> "$tmp"; fi; done < "$d/conf"
+  [[ $found -eq 0 && -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; mv -f "$tmp" "$d/conf"; }
+
+# ---- comandos simples ---------------------------------------------------------------------
+cmd_login(){ mkdir -p "$CFG"; chmod 700 "$CFG"
   local u p; read -rp "login MOJ: " u; read -rsp "senha: " p; echo
-  local body; body="$(jq -n --arg u "$u" --arg p "$p" '{username:$u, password:$p}')"
-  local tok; tok="$(api POST "/auth/login?contest=$CONTEST" "$body" | jq -r '.token // empty')"
-  [[ -n "$tok" ]] || die "login falhou."
-  ( umask 077; printf '%s' "$tok" > "$TOKENF" )
-  echo "ok, logado como $u."
-}
+  local tok; tok="$(api POST "/auth/login?contest=$CONTEST" "$(jq -n --arg u "$u" --arg p "$p" '{username:$u,password:$p}')" | jq -r '.token // empty')"
+  [[ -n "$tok" ]] || die "login falhou."; ( umask 077; printf '%s' "$tok" > "$TOKENF" ); echo "ok, logado como $u."; }
 cmd_logout(){ rm -f "$TOKENF"; echo "deslogado."; }
-cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"login: \(.login // "?")  nome: \(.name // "?")"'; }
-cmd_repos(){ need_login; api GET "/problems/repos" | jq -r '.repos[] | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
-cmd_ls(){ need_login; local tab="${1:-mine}"
-  api GET "/problems/$tab" | jq -r '.problems[] | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | column -t -s$'\t' 2>/dev/null || \
-  api GET "/problems/$tab" | jq -r '.problems[] | "  \(.id)  [\(if .public then "público" else "rascunho" end)]  \(.title // .prob)"'; }
-cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <pasta>"
-  api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"pasta criada: \(.repo) (dono \(.owner))"'; }
+cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"login: \(.login//"?")  nome: \(.name//"?")"'
+  local c; c="$(http_code GET "/treino/contest-create/permission")"; [[ "$c" == 200 ]] && api GET "/treino/contest-create/permission" | jq -r '"pode criar problemas: \(if .can_create then "sim" else "não" end)\(if .reason then " (\(.reason))" else "" end)"'; }
+cmd_repos(){ need_login; api GET "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
+cmd_ls(){ need_login; local tab="${1:-mine}"; api GET "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <pasta>"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"pasta criada: \(.repo) (dono \(.owner))"'; }
+cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id>"; api POST "/problems/set-public" "$(jq -n --arg id "$1" '{id:$id,public:true}')" | jq -r '"publicação enfileirada: \(.id) (reqid \(.reqid))"'; }
+cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off"; local v=false; [[ "$2" == on ]] && v=true; api POST "/problems/set-public" "$(jq -n --arg id "$1" --argjson p "$v" '{id:$id,public:$p}')" | jq -r '"\(.id): público=\(.public)\(if .reqid then " (reqid \(.reqid))" else "" end)"'; }
+cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
+cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
+cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
+
+cmd_status(){ need_login
+  if [[ $# -ge 1 ]]; then api GET "/problems/validation?id=$(enc "$1")" | jq -r 'if .status=="unvalidated" then "  ainda não validado" else "  validação: \(if .ok then "APROVADO" else "REPROVADO" end)\n" + ((.checks//[])|map("    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)")|join("\n")) end'
+  else api GET "/index/status" | jq -r '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; fi; }
+cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
+  api GET "/problems/get?id=$(enc "$1")" | jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\nautor: \(.author//"—")\ndono: \(.owner//"—")\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))\ntags: \((.tags//[])|join(", "))\nvalidação: \(if .validation==null then "—" elif .validation.ok then "APROVADO" else "REPROVADO" end)"'
+  api GET "/problems/source?id=$(enc "$1")" | jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' 2>/dev/null || true; }
 
 cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <pasta> <prob>"
-  local repo="$1" prob="$2" d="$2"
-  [[ -e "$d" ]] && die "já existe ./$d"
-  mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output" "$d/sols/good"
+  local repo="$1" prob="$2" d="$2"; [[ -e "$d" ]] && die "já existe ./$d"
   local me; me="$(api GET "/auth/status?contest=$CONTEST" | jq -r '.name // .login // ""')"
-  cat > "$d/docs/enunciado.md" <<'MD'
-% Título do Problema
+  local tmpl; tmpl="$(jq -n --arg a "$me" '{title:"Título do Problema", author:$a, tags:["iniciante"], collections:[], public:false,
+    enunciado_md:"% Título do Problema\n\nDescreva o problema.\n\n## Entrada\n\nDescreva a entrada.\n\n## Saída\n\nDescreva a saída.\n",
+    conf_text:"TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y\n",
+    examples:[{input:"1 2\n",output:"3\n"}], tests:[], sols:{good:[{filename:"sol.py",code:"a,b=map(int,input().split())\nprint(a+b)\n"}],slow:[],wrong:[],pass:[],upcoming:[]}}')"
+  json_to_pkg "$tmpl" "$d" "$repo#$prob"
+  echo "criado ./$d  (id $repo#$prob).  edite com 'moj edit $d' ou os arquivos + 'moj push $d'."; }
+cmd_clone(){ need_login; [[ $# -ge 1 ]] || die "uso: moj clone <id> [dir]"
+  local id="$1" d="${2:-${1##*#}}"; [[ -e "$d" ]] && die "já existe ./$d"
+  local src; src="$(api GET "/problems/source?id=$(enc "$id")")"
+  json_to_pkg "$src" "$d" "$id"; echo "clonado ./$d  (editable: $(jq -r '.editable' <<<"$src"))"; }
 
-Descreva o problema aqui.
-
-## Entrada
-
-Descreva a entrada.
-
-## Saída
-
-Descreva a saída.
-MD
-  printf '%s\n' "$me" > "$d/author"
-  printf 'iniciante\n' > "$d/tags"
-  printf 'ULIMITS[-u]=10000\nALLOWPARALLELTEST=y\n' > "$d/conf"
-  printf '1 2\n' > "$d/tests/input/sample1"; printf '3\n' > "$d/tests/output/sample1"
-  printf 'a,b=map(int,input().split())\nprint(a+b)\n' > "$d/sols/good/sol.py"
-  jq -n --arg r "$repo" --arg p "$prob" --arg t "Título do Problema" '{id:($r+"#"+$p), repo:$r, prob:$p, title:$t, collections:[$r]}' > "$d/.moj-id"
-  echo "criado ./$d  (id $repo#$prob).  edite e rode 'moj push $d'."
-}
-cmd_clone(){ need_login; [[ $# -ge 1 ]] || die "uso: moj clone <id>"
-  local id="$1" repo="${1%%#*}" prob="${1##*#}" d="${2:-$prob}"
-  [[ -e "$d" ]] && die "já existe ./$d (use 'moj clone <id> <dir>')"
-  local src; src="$(api GET "/problems/source?id=$(jqurl "$id")")"
-  json_to_pkg "$src" "$d"
-  jq -n --arg id "$id" --arg r "$repo" --arg p "$prob" --arg t "$(jq -r '.title // ""' <<<"$src")" \
-        --argjson c "$(jq -c '.collections // []' <<<"$src")" \
-        '{id:$id, repo:$r, prob:$p, title:$t, collections:$c}' > "$d/.moj-id"
-  echo "clonado ./$d  (editable: $(jq -r '.editable' <<<"$src"))"
-}
-cmd_test(){ local d="${1:-.}"; gate "$d" && echo "ok: pré-voo passou (enunciado, exemplos e solução presentes)."; }
-gate(){ # checagens leves locais (o portão autoritativo é no servidor, no publish)
-  local d="$1" ok=1
+gate(){ local d="$1" ok=1
   [[ -s "$d/docs/enunciado.md" || -s "$d/enunciado.md" ]] || { echo "  ⚠ sem enunciado" >&2; ok=0; }
-  local nex; nex="$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)"
-  [[ "$nex" -ge 1 ]] || { echo "  ⚠ sem exemplos (tests/input/sample*)" >&2; ok=0; }
+  [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
-  [[ $ok -eq 1 ]]
-}
+  [[ $ok -eq 1 ]]; }
+cmd_test(){ local d="${1:-.}"; gate "$d" && echo "ok: pré-voo passou (enunciado, exemplos e solução good presentes)."; }
 cmd_push(){ need_login
   local force=0 d="."; for a in "$@"; do case "$a" in --force) force=1;; *) d="$a";; esac; done
-  [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new' ou 'moj clone')."
+  [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new'/'moj clone')."
   local id repo prob; id="$(jq -r .id "$d/.moj-id")"; repo="$(jq -r .repo "$d/.moj-id")"; prob="$(jq -r .prob "$d/.moj-id")"
   if ! gate "$d"; then [[ $force -eq 1 ]] || die "pré-voo falhou (use --force só p/ rascunho privado)."; echo "  (--force: subindo mesmo assim)"; fi
   local body; body="$(pkg_to_json "$d")"
-  # existe no servidor? -> edit ; senão -> create (garante a pasta antes)
-  if [[ "$(http_code GET "/problems/source?id=$(jqurl "$id")")" == 2* ]]; then
+  if [[ "$(http_code GET "/problems/source?id=$(enc "$id")")" == 2* ]]; then
     api POST "/problems/edit" "$(jq -c --arg id "$id" '. + {id:$id}' <<<"$body")" | jq -r '"enviado (edit): \(.id)  sha \(.sha)"'
   else
     api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
-    api POST "/problems/create" "$(jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r, prob:$p}' <<<"$body")" | jq -r '"enviado (novo): \(.id)  sha \(.sha)"'
-  fi
-  echo "publique com 'moj publish $id' quando estiver pronto."
-}
-cmd_publish(){   need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id>";   api POST "/problems/set-public" "$(jq -n --arg id "$1" '{id:$id, public:true}')"  | jq -r '"publicação enfileirada: \(.id) (reqid \(.reqid))"'; }
-cmd_unpublish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj unpublish <id>"; api POST "/problems/set-public" "$(jq -n --arg id "$1" '{id:$id, public:false}')" | jq -r '"despublicado: \(.id)"'; }
-cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
-cmd_status(){ need_login; [[ $# -ge 1 ]] || die "uso: moj status <id>"
-  api GET "/problems/validation?id=$(jqurl "$1")" | jq -r '
-    if .status=="unvalidated" then "  ainda não validado"
-    else "  validação: \(if .ok then "APROVADO" else "REPROVADO" end)\n" + ((.checks // [])|map("    \(if .ok then "✓" else "✗" end) \(.name)\(if .detail!="" then " — \(.detail)" else "" end)")|join("\n")) end'; }
-cmd_share(){   need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>";   api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r, add:[$u]}')"    | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
-cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r, remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
+    api POST "/problems/create" "$(jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' <<<"$body")" | jq -r '"enviado (novo): \(.id)  sha \(.sha)"'
+  fi; echo "publique com 'moj publish $id' quando estiver pronto."; }
 
-jqurl(){ jq -rn --arg s "$1" '$s|@uri'; }
+cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
+  local id="$1" out="${2:-${1##*#}.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
+  curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
+cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(tar.gz|tar.bz2|tar.zst|zip)>"
+  [[ -f "$2" ]] || die "arquivo não encontrado: $2"
+  api POST "/problems/upload" "$(jq -n --arg id "$1" --arg t "$(base64 -w0 < "$2")" '{id:$id,tar_b64:$t}')" | jq -r '"enviado: \(.id)  sha \(.sha)"'; }
+cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -f "$d/docs/enunciado.md" ]] || die "rode dentro de um problema."
+  local body; body="$(jq -c '{enunciado_md, examples}' <<<"$(pkg_to_json "$d")")"
+  local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
+  echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
+
+cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls) api GET "/problems/collections" | jq -r '.collections[]? | "  \(.name)  [\(.count) probs]  dono:\(.owner//"—")  setters:\((.members//[])|join(","))  admins:\((.admins//[])|join(","))\(if .can_manage then "  *você gerencia*" else "" end)"';;
+    create) [[ $# -ge 1 ]] || die "uso: moj collection create <nome> [--members a,b] [--admins c,d]"
+      local name="$1"; shift; local mem="" adm=""
+      while [[ $# -gt 0 ]]; do case "$1" in --members) mem="$2"; shift;; --admins) adm="$2"; shift;; esac; shift; done
+      api POST "/problems/collection-create" "$(jq -n --arg n "$name" --arg m "$mem" --arg a "$adm" '{name:$n, members:($m|split(",")|map(select(length>0))), admins:($a|split(",")|map(select(length>0)))}')" \
+        | jq -r '"coleção \(.name): setters [\(.members|join(","))] admins [\(.admins|join(","))]"';;
+    members) [[ $# -ge 1 ]] || die "uso: moj collection members <nome> [--add a] [--remove b] [--admins-add c] [--admins-remove d]"
+      local name="$1"; shift
+      [[ $# -eq 0 ]] && { api GET "/problems/collection-members?name=$(enc "$name")" | jq -r '"dono: \(.owner)\nsetters: \((.members//[])|join(", "))\nadmins: \((.admins//[])|join(", "))\ngerencio: \(.can_manage)"'; return; }
+      local add="" rem="" aadd="" arem=""
+      while [[ $# -gt 0 ]]; do case "$1" in --add) add="$2"; shift;; --remove) rem="$2"; shift;; --admins-add) aadd="$2"; shift;; --admins-remove) arem="$2"; shift;; esac; shift; done
+      api POST "/problems/collection-members" "$(jq -n --arg n "$name" --arg a "$add" --arg r "$rem" --arg aa "$aadd" --arg ar "$arem" \
+        '{name:$n, add:($a|split(",")|map(select(length>0))), remove:($r|split(",")|map(select(length>0))), admins_add:($aa|split(",")|map(select(length>0))), admins_remove:($ar|split(",")|map(select(length>0)))}')" \
+        | jq -r '"setters: \((.members//[])|join(", "))\nadmins: \((.admins//[])|join(", "))"';;
+    *) die "subcomando de coleção: ls | create | members";;
+  esac; }
+
+# ---- editor interativo (como os campos da página) -----------------------------------------
+mid(){ jq -r ".$2 // \"\"" "$1/.moj-id" 2>/dev/null; }                 # campo do .moj-id
+mid_set(){ local d="$1"; shift; local t; t="$(mktemp)"; jq "$@" "$d/.moj-id" > "$t" && mv -f "$t" "$d/.moj-id"; }
+edit_examples(){ local d="$1"
+  while true; do echo; echo "Exemplos (aparecem no enunciado):"
+    local i=0 f; shopt -s nullglob; for f in "$d/tests/input"/sample*; do i=$((i+1)); echo "  $i) $(basename "$f")  in: $(head -c40 "$f"|tr '\n' ' ')"; done; shopt -u nullglob
+    case "$(ask "  [a]dicionar [e]ditar N [r]emover N [v]oltar: ")" in
+      a) local n=$(( $(find "$d/tests/input" -name 'sample*'|wc -l) + 1 )); "$ED" "$d/tests/input/sample$n" </dev/tty; "$ED" "$d/tests/output/sample$n" </dev/tty;;
+      e*) local k="${REPLY:-}"; k="$(ask '  qual N? ')"; [[ -f "$d/tests/input/sample$k" ]] && { "$ED" "$d/tests/input/sample$k" </dev/tty; "$ED" "$d/tests/output/sample$k" </dev/tty; };;
+      r*) local k; k="$(ask '  qual N? ')"; rm -f "$d/tests/input/sample$k" "$d/tests/output/sample$k";;
+      *) return;;
+    esac; done; }
+edit_tests(){ local d="$1"
+  while true; do echo; echo "Testes ocultos (correção):"
+    local f; shopt -s nullglob; for f in "$d/tests/input"/*; do [[ "$(basename "$f")" == sample* ]] && continue; echo "  - $(basename "$f")"; done; shopt -u nullglob
+    case "$(ask '  [a]dicionar [e]ditar <nome> [r]emover <nome> [v]oltar: ')" in
+      a) local nm; nm="$(ask '  nome do teste: ')"; nm="$(tr -cd 'A-Za-z0-9._-' <<<"$nm")"; [[ -n "$nm" ]] || continue; "$ED" "$d/tests/input/$nm" </dev/tty; "$ED" "$d/tests/output/$nm" </dev/tty;;
+      e*) local nm; nm="$(ask '  nome: ')"; [[ -f "$d/tests/input/$nm" ]] && { "$ED" "$d/tests/input/$nm" </dev/tty; "$ED" "$d/tests/output/$nm" </dev/tty; };;
+      r*) local nm; nm="$(ask '  nome: ')"; rm -f "$d/tests/input/$nm" "$d/tests/output/$nm";;
+      *) return;;
+    esac; done; }
+edit_sols(){ local d="$1"
+  while true; do echo; echo "Soluções:"
+    local c f; for c in good wrong slow pass upcoming; do printf '  %s: ' "$c"; shopt -s nullglob; for f in "$d/sols/$c"/*; do printf '%s ' "$(basename "$f")"; done; shopt -u nullglob; echo; done
+    local cat; cat="$(ask '  categoria (good/wrong/slow/pass/upcoming) ou [v]oltar: ')"
+    case "$cat" in good|wrong|slow|pass|upcoming) mkdir -p "$d/sols/$cat"
+        case "$(ask "  [$cat] [a]dicionar [e]ditar <arq> [r]emover <arq> [v]oltar: ")" in
+          a) local fn; fn="$(ask '  nome do arquivo (ex: sol.cpp): ')"; fn="$(basename "$fn")"; [[ -n "$fn" ]] && "$ED" "$d/sols/$cat/$fn" </dev/tty;;
+          e*) local fn; fn="$(ask '  arquivo: ')"; [[ -f "$d/sols/$cat/$fn" ]] && "$ED" "$d/sols/$cat/$fn" </dev/tty;;
+          r*) local fn; fn="$(ask '  arquivo: ')"; rm -f "$d/sols/$cat/$fn";;
+        esac;;
+      *) return;;
+    esac; done; }
+edit_conf(){ local d="$1"
+  while true; do echo; echo "Configurações (conf):"
+    printf '  1) calibrafactor: %s\n  2) ULIMITS[-u]: %s\n  3) CALIBRATIONTL: %s\n  4) ALLOWPARALLELTEST: %s\n  5) STOPWHEN_WA: %s\n' \
+      "$(conf_get "$d" 'TLMOD[calibrafactor]')" "$(conf_get "$d" 'ULIMITS[-u]')" "$(conf_get "$d" CALIBRATIONTL)" "$(conf_get "$d" ALLOWPARALLELTEST)" "$(conf_get "$d" STOPWHEN_WA)"
+    case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
+      1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
+      2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
+      3) conf_set "$d" CALIBRATIONTL "$(ask '  CALIBRATIONTL (s): ' "$(conf_get "$d" CALIBRATIONTL)")";;
+      4) conf_set "$d" ALLOWPARALLELTEST "$(ask '  ALLOWPARALLELTEST (y/n): ' "$(conf_get "$d" ALLOWPARALLELTEST)")";;
+      5) conf_set "$d" STOPWHEN_WA "$(ask '  STOPWHEN_WA (y/n): ' "$(conf_get "$d" STOPWHEN_WA)")";;
+      b) "$ED" "$d/conf" </dev/tty;;
+      *) return;;
+    esac; done; }
+edit_colls(){ local d="$1" cur; cur="$(jq -r '(.collections//[])|join(",")' "$d/.moj-id")"
+  echo; echo "Coleções atuais: ${cur:-—}"; echo "  disponíveis:"; api GET "/problems/collections" | jq -r '.collections[]? | "    \(.name)\(if .can_manage then " *gerencio*" else "" end)"'
+  case "$(ask '  [s]et lista [c]riar nova [m]embros <nome> [v]oltar: ')" in
+    s) mid_set "$d" --argjson c "$(jq -n --arg s "$(ask '  coleções (vírgula): ' "$cur")" '$s|split(",")|map(select(length>0))')" '.collections=$c';;
+    c) local n m a; n="$(ask '  nome: ')"; m="$(ask '  setters (vírgula): ')"; a="$(ask '  co-admins (vírgula): ')"
+       [[ -n "$n" ]] && { cmd_collection create "$n" --members "$m" --admins "$a"; mid_set "$d" --arg n "$n" '.collections=((.collections//[])+[$n]|unique)'; };;
+    m) local n; n="$(ask '  coleção: ')"; [[ -n "$n" ]] && cmd_collection members "$n";;
+  esac; }
+cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edit <id|dir>"
+  [[ -r /dev/tty ]] || die "moj edit é interativo — precisa de um terminal."
+  local D
+  if [[ -f "$arg/.moj-id" ]]; then D="$arg"
+  elif [[ "$arg" == *#* ]]; then D="${arg##*#}"; [[ -e "$D" ]] || cmd_clone "$arg" "$D" >/dev/null; [[ -f "$D/.moj-id" ]] || die "não consegui clonar $arg"
+  else die "passe um id (repo#prob) ou um diretório já clonado."; fi
+  local id; id="$(mid "$D" id)"
+  while true; do
+    echo; echo "── Editando $id  (pasta ./$D) ─────────────────────────────"
+    printf '  1) Título:    %s\n  2) Autor:     %s\n  3) Tags:      %s\n' "$(mid "$D" title)" "$(head -1 "$D/author" 2>/dev/null)" "$(paste -sd, "$D/tags" 2>/dev/null)"
+    printf '  4) Enunciado  (editor)   5) Exemplos (%s)   6) Testes ocultos (%s)\n' "$(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l)" "$(( $(find "$D/tests/input" -type f 2>/dev/null|wc -l) - $(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l) ))"
+    printf '  7) Soluções (good:%s wrong:%s slow:%s)   8) Conf   9) Coleções: %s\n' "$(ls "$D/sols/good" 2>/dev/null|wc -l)" "$(ls "$D/sols/wrong" 2>/dev/null|wc -l)" "$(ls "$D/sols/slow" 2>/dev/null|wc -l)" "$(jq -r '(.collections//[])|join(",")' "$D/.moj-id")"
+    printf '  0) Público: %s    r) Compartilhar pasta    v) Pré-visualizar\n' "$(mid "$D" public)"
+    printf '  w) SALVAR (push)   P) Validar & Publicar   i) Info/validação   q) Sair\n'
+    case "$(ask '  > ')" in
+      1) mid_set "$D" --arg t "$(ask '  Título: ' "$(mid "$D" title)")" '.title=$t';;
+      2) ask '  Autor: ' "$(head -1 "$D/author" 2>/dev/null)" > "$D/author";;
+      3) ask '  Tags (vírgula): ' "$(paste -sd, "$D/tags" 2>/dev/null)" | tr ',' '\n' | sed '/^[[:space:]]*$/d;s/^[[:space:]]*//;s/[[:space:]]*$//' > "$D/tags";;
+      4) "$ED" "$D/docs/enunciado.md" </dev/tty;;
+      5) edit_examples "$D";; 6) edit_tests "$D";; 7) edit_sols "$D";; 8) edit_conf "$D";; 9) edit_colls "$D";;
+      0) local p; p="$(mid "$D" public)"; [[ "$p" == true ]] && p=false || p=true; mid_set "$D" --argjson p "$p" '.public=$p'; echo "  (aplica no próximo 'salvar')";;
+      r) local act u; act="$(ask '  [a]dd ou [r]emove colaborador? ')"; u="$(ask '  login: ')"; [[ -n "$u" ]] && { [[ "$act" == r ]] && cmd_unshare "$(mid "$D" repo)" "$u" || cmd_share "$(mid "$D" repo)" "$u"; };;
+      v) cmd_preview "$D";;
+      w) cmd_push "$D"; local want; want="$(mid "$D" public)"; cmd_public "$id" "$([[ "$want" == true ]] && echo on || echo off)" >/dev/null 2>&1 || true; echo "  salvo.";;
+      P) cmd_push "$D" >/dev/null && cmd_publish "$id";;
+      i) cmd_status "$id";;
+      q) echo "até mais."; return;;
+    esac
+  done; }
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
-  ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";;
-  new) cmd_new "$@";; clone|open) cmd_clone "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
-  publish) cmd_publish "$@";; unpublish) cmd_unpublish "$@";; calibrate) cmd_calibrate "$@";;
-  status) cmd_status "$@";; share) cmd_share "$@";; unshare) cmd_unshare "$@";;
-  help|-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//';;
+  ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
+  new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
+  preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";;
+  publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";;
+  share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";;
+  help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac
