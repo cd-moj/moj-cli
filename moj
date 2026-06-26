@@ -53,14 +53,20 @@ pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
 ask(){ local p="$1" def="${2:-}" v; read -e -i "$def" -r -p "$p" v </dev/tty || true; printf '%s' "$v"; }
 
 # ---- pacote <-> JSON (fidelidade total) ---------------------------------------------------
-_pairs(){ local d="$1" w="$2" out='[' first=1 inp nm op
-  shopt -s nullglob
-  for inp in "$d/tests/input"/*; do nm="$(basename "$inp")"
-    if [[ "$w" == sample ]]; then [[ "$nm" == sample* ]] || continue; else [[ "$nm" == sample* ]] && continue; fi
+_pairs(){ local d="$1" w="$2" out='[' first=1 nm op ex idx notes='[]'
+  # explicações dos exemplos (na ordem) p/ anexar a cada sample
+  [[ "$w" == sample && -f "$d/docs/sample-notes.json" ]] && { notes="$(jq -c . "$d/docs/sample-notes.json" 2>/dev/null)"; [[ -n "$notes" ]] || notes='[]'; }
+  local names=(); shopt -s nullglob
+  if [[ "$w" == sample ]]; then mapfile -t names < <(cd "$d/tests/input" 2>/dev/null && ls -1v sample* 2>/dev/null)
+  else local f; for f in "$d/tests/input"/*; do nm="$(basename "$f")"; [[ "$nm" == sample* ]] || names+=("$nm"); done; fi
+  shopt -u nullglob
+  for nm in "${names[@]}"; do
     op="$d/tests/output/$nm"; [[ -f "$op" ]] || op=/dev/null
+    ex=''; if [[ "$w" == sample && "$nm" =~ ^sample([0-9]+)$ ]]; then idx=$(( ${BASH_REMATCH[1]} - 1 )); ex="$(jq -r --argjson i "$idx" '.[$i] // ""' <<<"$notes" 2>/dev/null)"; fi
     [[ $first -eq 1 ]] || out+=','; first=0
-    out+="$(jq -n --arg nm "$nm" --rawfile i "$inp" --rawfile o "$op" '{name:$nm,input:$i,output:$o}')"
-  done; shopt -u nullglob; printf '%s]' "$out"; }
+    out+="$(jq -n --arg nm "$nm" --rawfile i "$d/tests/input/$nm" --rawfile o "$op" --arg ex "$ex" \
+            '{name:$nm,input:$i,output:$o} + (if $ex=="" then {} else {explanation:$ex} end)')"
+  done; printf '%s]' "$out"; }
 _cat(){ local d="$1" c="$2" out='[' first=1 f
   shopt -s nullglob
   for f in "$d/sols/$c"/*; do [[ -f "$f" ]] || continue
@@ -77,9 +83,11 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
         --argjson exs "$(_pairs "$d" sample)" --argjson tss "$(_pairs "$d" hidden)" \
         --argjson good "$(_cat "$d" good)" --argjson slow "$(_cat "$d" slow)" --argjson wrong "$(_cat "$d" wrong)" \
-        --argjson pass "$(_cat "$d" pass)" --argjson up "$(_cat "$d" upcoming)" '
+        --argjson pass "$(_cat "$d" pass)" --argjson up "$(_cat "$d" upcoming)" \
+        --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --argjson editorial "$(slurp "$d/docs/solucao.md")" '
     {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
-     conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}'; }
+     conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
+    + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'; }
 json_to_pkg(){ local j="$1" d="$2" id="$3"
   mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output"
   local efmt; efmt="$(jq -r '.format // .enunciado_format // "md"' <<<"$j")"; [[ "$efmt" =~ ^(md|org|tex)$ ]] || efmt=md
@@ -91,6 +99,11 @@ json_to_pkg(){ local j="$1" d="$2" id="$3"
   while IFS= read -r p; do nm="$(jq -r '.name//empty' <<<"$p")"; [[ -n "$nm" ]] || continue; jq -r '.input' <<<"$p" > "$d/tests/input/$nm"; jq -r '.output' <<<"$p" > "$d/tests/output/$nm"; done < <(jq -c '(.tests//[])[]' <<<"$j")
   local cat s fn; for cat in good slow wrong pass upcoming; do mkdir -p "$d/sols/$cat"
     while IFS= read -r s; do fn="$(jq -r '.filename' <<<"$s")"; [[ -n "$fn" ]] && jq -r '.code' <<<"$s" > "$d/sols/$cat/$fn"; done < <(jq -c --arg c "$cat" '(.sols[$c]//[])[]' <<<"$j"); done
+  # explicações dos exemplos (na ordem) -> docs/sample-notes.json
+  local notes; notes="$(jq -c '[(.examples//[])[] | (.explanation // "")]' <<<"$j")"
+  if [[ "$(jq -r 'map(select(.!=""))|length' <<<"$notes" 2>/dev/null)" -gt 0 ]]; then printf '%s' "$notes" > "$d/docs/sample-notes.json"; else rm -f "$d/docs/sample-notes.json"; fi
+  # resolução/editorial (só setter; não vai p/ o aluno) -> docs/solucao.md
+  local ed; ed="$(jq -r '.editorial_md // ""' <<<"$j")"; if [[ -n "$ed" ]]; then printf '%s' "$ed" > "$d/docs/solucao.md"; else rm -f "$d/docs/solucao.md"; fi
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --argjson s "$j" \
     '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), public:($s.public//false)}' > "$d/.moj-id"; }
 
@@ -128,7 +141,7 @@ cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <pasta> <prob>"
   local repo="$1" prob="$2" d="$2"; [[ -e "$d" ]] && die "já existe ./$d"
   local me; me="$(api GET "/auth/status?contest=$CONTEST" | jq -r '.name // .login // ""')"
   local tmpl; tmpl="$(jq -n --arg a "$me" '{title:"Título do Problema", author:$a, tags:["iniciante"], collections:[], public:false,
-    enunciado_md:"% Título do Problema\n\nDescreva o problema.\n\n## Entrada\n\nDescreva a entrada.\n\n## Saída\n\nDescreva a saída.\n",
+    enunciado_md:"Descreva o problema.\n\n## Entrada\n\nDescreva a entrada.\n\n## Saída\n\nDescreva a saída.\n\n## Observações\n\nRestrições e limites.\n",
     conf_text:"TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y\n",
     examples:[{input:"1 2\n",output:"3\n"}], tests:[], sols:{good:[{filename:"sol.py",code:"a,b=map(int,input().split())\nprint(a+b)\n"}],slow:[],wrong:[],pass:[],upcoming:[]}}')"
   json_to_pkg "$tmpl" "$d" "$repo#$prob"
@@ -174,7 +187,7 @@ cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz
   jq -n --arg r "$2" --arg p "${3:-}" --rawfile t "$b64" '{repo:$r, prob:(if $p=="" then null else $p end), tar_b64:$t}' > "$bf"
   api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
-  local body; body="$(jq -c '{enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
+  local body; body="$(jq -c '{title, enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
