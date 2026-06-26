@@ -134,8 +134,25 @@ cmd_status(){ need_login
   if [[ $# -ge 1 ]]; then api GET "/problems/validation?id=$(enc "$1")" | jq -r 'if .status=="unvalidated" then "  ainda não validado" else "  validação: \(if .ok then "APROVADO" else "REPROVADO" end)\n" + ((.checks//[])|map("    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)")|join("\n")) end'
   else api GET "/index/status" | jq -r '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; fi; }
 cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
-  api GET "/problems/get?id=$(enc "$1")" | jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\nautor: \(.author//"—")\ndono: \(.owner//"—")\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))\ntags: \((.tags//[])|join(", "))\nvalidação: \(if .validation==null then "—" elif .validation.ok then "APROVADO" else "REPROVADO" end)"'
-  api GET "/problems/source?id=$(enc "$1")" | jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' 2>/dev/null || true; }
+  local id="$1" d="${1##*#}"
+  # cache: se há um CLONE LOCAL, mostra os metadados/contagens dele — sem consultar o servidor.
+  if [[ -f "$d/.moj-id" && "$(jq -r '.id//""' "$d/.moj-id" 2>/dev/null)" == "$id" ]]; then
+    jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))"' "$d/.moj-id"
+    printf 'autor: %s\ntags: %s\n' "$(head -1 "$d/author" 2>/dev/null || echo —)" "$(paste -sd', ' "$d/tags" 2>/dev/null)"
+    printf 'exemplos: %s  testes ocultos: %s\nsoluções: %s\n' \
+      "$(find "$d/tests/input" -name 'sample*' 2>/dev/null | wc -l)" \
+      "$(( $(find "$d/tests/input" -type f 2>/dev/null | wc -l) - $(find "$d/tests/input" -name 'sample*' 2>/dev/null | wc -l) ))" \
+      "$(for c in good wrong slow pass upcoming; do n=$(ls "$d/sols/$c" 2>/dev/null | wc -l); ((n)) && printf '%s:%s ' "$c" "$n"; done)"
+    echo "(do clone local ./$d — 'moj status $id' p/ a validação atual do servidor)"; return 0
+  fi
+  # sem clone: vai ao servidor, mas com os 2 GETs em PARALELO (não em série).
+  local gt st; gt="$(mktemp)"; st="$(mktemp)"
+  api GET "/problems/get?id=$(enc "$id")"    > "$gt" 2>/dev/null &
+  api GET "/problems/source?id=$(enc "$id")" > "$st" 2>/dev/null &
+  wait
+  jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\nautor: \(.author//"—")\ndono: \(.owner//"—")\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))\ntags: \((.tags//[])|join(", "))\nvalidação: \(if .validation==null then "—" elif .validation.ok then "APROVADO" else "REPROVADO" end)"' "$gt" 2>/dev/null
+  jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' "$st" 2>/dev/null || true
+  rm -f "$gt" "$st"; }
 
 cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <pasta> <prob>"
   local repo="$1" prob="$2" d="$2"; [[ -e "$d" ]] && die "já existe ./$d"
