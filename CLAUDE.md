@@ -14,3 +14,5 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   `cdmoj` (ver `cdmoj/CLAUDE.md`).
 - Um arquivo só (`moj`), `bash -euo pipefail`. `bash -n moj` antes de commitar.
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
+- **Doc junto com o código** (doc atrasada = bug): mudou subcomando/contrato? atualize o `README.md`, o
+  cabeçalho de `moj` e `cdmoj/docs/API.md` (+ `openapi.json`) no mesmo commit.
