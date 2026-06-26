@@ -13,3 +13,4 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - É um **cliente** da API — não tem lógica de julgamento própria. O formato de pacote é o do
   `cdmoj` (ver `cdmoj/CLAUDE.md`).
 - Um arquivo só (`moj`), `bash -euo pipefail`. `bash -n moj` antes de commitar.
+- Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
