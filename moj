@@ -36,6 +36,17 @@ api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die)
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
   die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
 }
+# cache local de GET: devolve o que está salvo se ainda fresco (TTL s); senão busca e grava.
+# Evita repetir round-trips caros (o servidor só responde por IPv6; cada conexão custa segundos
+# em redes com IPv6 lento). MOJ_NO_CACHE=1 ignora o cache.
+api_get_cached(){ local ttl="$1" p="$2" cf age out
+  [[ "${MOJ_NO_CACHE:-0}" == 1 ]] && { api GET "$p"; return; }
+  cf="$CFG/cache/$(printf '%s' "$p" | md5sum 2>/dev/null | cut -c1-24).json"
+  age=$(( $(date +%s) - $(stat -c %Y "$cf" 2>/dev/null || echo 0) ))
+  if [[ -f "$cf" ]] && (( age < ttl )); then cat "$cf"; return 0; fi
+  out="$(api GET "$p")" || return 1
+  ( umask 077; mkdir -p "$(dirname "$cf")" 2>/dev/null; printf '%s' "$out" > "$cf" ) 2>/dev/null
+  printf '%s' "$out"; }
 http_code(){ local m="$1" p="$2" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
   curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
 need_login(){ [[ -f "$TOKENF" ]] || die "faça 'moj login' primeiro."; }
@@ -121,8 +132,8 @@ cmd_login(){ mkdir -p "$CFG"; chmod 700 "$CFG"
 cmd_logout(){ rm -f "$TOKENF"; echo "deslogado."; }
 cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"login: \(.login//"?")  nome: \(.name//"?")"'
   local c; c="$(http_code GET "/treino/contest-create/permission")"; [[ "$c" == 200 ]] && api GET "/treino/contest-create/permission" | jq -r '"pode criar problemas: \(if .can_create then "sim" else "não" end)\(if .reason then " (\(.reason))" else "" end)"'; }
-cmd_repos(){ need_login; api GET "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
-cmd_ls(){ need_login; local tab="${1:-mine}"; api GET "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_repos(){ need_login; api_get_cached 60 "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
+cmd_ls(){ need_login; local tab="${1:-mine}"; api_get_cached 60 "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <pasta>"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"pasta criada: \(.repo) (dono \(.owner))"'; }
 cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id>"; api POST "/problems/set-public" "$(jq -n --arg id "$1" '{id:$id,public:true}')" | jq -r '"publicação enfileirada: \(.id) (reqid \(.reqid))"'; }
 cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off"; local v=false; [[ "$2" == on ]] && v=true; api POST "/problems/set-public" "$(jq -n --arg id "$1" --argjson p "$v" '{id:$id,public:$p}')" | jq -r '"\(.id): público=\(.public)\(if .reqid then " (reqid \(.reqid))" else "" end)"'; }
@@ -145,10 +156,10 @@ cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
       "$(for c in good wrong slow pass upcoming; do n=$(ls "$d/sols/$c" 2>/dev/null | wc -l); ((n)) && printf '%s:%s ' "$c" "$n"; done)"
     echo "(do clone local ./$d — 'moj status $id' p/ a validação atual do servidor)"; return 0
   fi
-  # sem clone: vai ao servidor, mas com os 2 GETs em PARALELO (não em série).
+  # sem clone: vai ao servidor — 2 GETs em PARALELO e com cache local (TTL 60s; repete = instantâneo).
   local gt st; gt="$(mktemp)"; st="$(mktemp)"
-  api GET "/problems/get?id=$(enc "$id")"    > "$gt" 2>/dev/null &
-  api GET "/problems/source?id=$(enc "$id")" > "$st" 2>/dev/null &
+  api_get_cached 60 "/problems/get?id=$(enc "$id")"    > "$gt" 2>/dev/null &
+  api_get_cached 60 "/problems/source?id=$(enc "$id")" > "$st" 2>/dev/null &
   wait
   jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\nautor: \(.author//"—")\ndono: \(.owner//"—")\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))\ntags: \((.tags//[])|join(", "))\nvalidação: \(if .validation==null then "—" elif .validation.ok then "APROVADO" else "REPROVADO" end)"' "$gt" 2>/dev/null
   jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' "$st" 2>/dev/null || true
