@@ -11,6 +11,7 @@
 #   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
 #   moj public <id> on|off        moj publish <id>                moj calibrate <id>
 #   moj share <pasta> <login>     moj unshare <pasta> <login>
+#   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
 #                  | members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]
 # Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local),
@@ -213,6 +214,12 @@ cmd_push(){ need_login
   fi
   rm -f "$bf" "$bf2"; echo "publique com 'moj publish $id' quando estiver pronto."; }
 
+cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o problema do Gitea e do treino)"
+  local id="$1" c
+  echo "⚠ Isto REMOVE o problema '$id' do Gitea e do treino — destrutivo."
+  read -rp "Para confirmar, repita o id ($id): " c </dev/tty || true
+  [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
+  api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
 cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
   local id="$1" out="${2:-${1##*#}.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
@@ -344,7 +351,7 @@ case "$cmd" in
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";;
-  share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";;
+  share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac
