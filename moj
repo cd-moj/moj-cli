@@ -31,7 +31,7 @@ have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
 api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die)
   local m="$1" p="$2" data="${3:-}" auth=() out code tmp; tmp="$(mktemp)"
   [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  if [[ -n "$data" ]]; then code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data "$data" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
+  if [[ -n "$data" ]]; then code="$(printf '%s' "$data" | curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data-binary @- "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   else code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"; fi
   out="$(cat "$tmp")"; rm -f "$tmp"
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
@@ -90,13 +90,15 @@ _cat(){ local d="$1" c="$2" of="$3" f
 enun_path(){ local e; for e in md org tex; do [[ -f "$1/docs/enunciado.$e" ]] && { printf '%s' "$1/docs/enunciado.$e"; return; }; done; printf '%s' "$1/docs/enunciado.md"; }
 pkg_to_json(){ local d="$1" enunf="" efmt=md
   local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; case "$ef" in *.org) efmt=org;; *.tex) efmt=tex;; *) efmt=md;; esac; break; }; done
-  # exemplos/testes/soluções vão p/ NDJSON em arquivos temporários e entram via --slurpfile (jq lê
-  # o arquivo) — assim os testes grandes NÃO viram argumentos de jq (ARG_MAX). enun/conf/editorial
-  # são pequenos (statement/markdown), seguem por --argjson.
+  # exemplos/testes/soluções vão p/ NDJSON em arquivos e entram via --slurpfile (jq lê o arquivo);
+  # enun/editorial podem ser GRANDES (imagens coladas viram data:URI) -> --rawfile (arquivo). Nada
+  # de conteúdo grande por argumento de jq (era o ARG_MAX). conf é pequeno -> segue por --argjson.
   local t; t="$(mktemp -d)"
   _pairs "$d" sample "$t/exs"; _pairs "$d" hidden "$t/tss"
   _cat "$d" good "$t/good"; _cat "$d" slow "$t/slow"; _cat "$d" wrong "$t/wrong"; _cat "$d" pass "$t/pass"; _cat "$d" upcoming "$t/up"
-  jq -n --argjson enun "$(slurp "$enunf")" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
+  local enf="${enunf:-/dev/null}"; [[ -f "$enf" ]] || enf=/dev/null
+  local edf="$d/docs/solucao.md"; [[ -f "$edf" ]] || edf=/dev/null
+  jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
@@ -104,7 +106,7 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
         --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" \
         --slurpfile good "$t/good" --slurpfile slow "$t/slow" --slurpfile wrong "$t/wrong" \
         --slurpfile pass "$t/pass" --slurpfile up "$t/up" \
-        --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --argjson editorial "$(slurp "$d/docs/solucao.md")" '
+        --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --rawfile editorial "$edf" '
     {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
