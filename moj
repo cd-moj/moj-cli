@@ -9,7 +9,7 @@
 #   moj new <pasta> <prob>        moj clone <id> [dir]            moj info <id>
 #   moj edit <id|dir>             moj test [dir]                  moj push [dir] [--force]
 #   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
-#   moj public <id> on|off        moj publish <id>                moj calibrate <id>
+#   moj public <id> on|off [--yes]   moj publish <id>             moj calibrate <id>
 #   moj share <pasta> <login>     moj unshare <pasta> <login>
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
@@ -147,8 +147,17 @@ cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"logi
 cmd_repos(){ need_login; api_get_cached 60 "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
 cmd_ls(){ need_login; local tab="${1:-mine}"; api_get_cached 60 "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <pasta>"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"pasta criada: \(.repo) (dono \(.owner))"'; }
-cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id>"; api POST "/problems/set-public" "$(jq -n --arg id "$1" '{id:$id,public:true}')" | jq -r '"publicação enfileirada: \(.id) (reqid \(.reqid))"'; }
-cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off"; local v=false; [[ "$2" == on ]] && v=true; api POST "/problems/set-public" "$(jq -n --arg id "$1" --argjson p "$v" '{id:$id,public:$p}')" | jq -r '"\(.id): público=\(.public)\(if .reqid then " (reqid \(.reqid))" else "" end)"'; }
+cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id> [--yes]   (= moj public <id> on)"; cmd_public "$1" on "${@:2}"; }
+cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--yes]"
+  local id="$1" onoff="$2" yes=0 a; shift 2; for a in "$@"; do [[ "$a" == --yes || "$a" == -y ]] && yes=1; done
+  local v=false; [[ "$onoff" == on ]] && v=true
+  # TORNAR PÚBLICO é ação cautelosa: confirma (provas devem ficar privadas). --yes p/ scripts.
+  if [[ "$v" == true && "$yes" -eq 0 ]]; then
+    echo "⚠ TORNAR PÚBLICO publica '$id' no TREINO LIVRE (visível a TODOS). Provas devem ficar privadas." >&2
+    local c; read -rp "Confirmar publicação? [s/N] " c </dev/tty || true
+    [[ "$c" =~ ^[sySY] ]] || die "cancelado — nada publicado."
+  fi
+  api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" | jq -r '"\(.id): público=\(.public)\(if .reqid then " (reqid \(.reqid))" else "" end)"'; }
 cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
 cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
 cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
