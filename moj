@@ -64,8 +64,11 @@ pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
 ask(){ local p="$1" def="${2:-}" v; read -e -i "$def" -r -p "$p" v </dev/tty || true; printf '%s' "$v"; }
 
 # ---- pacote <-> JSON (fidelidade total) ---------------------------------------------------
-_pairs(){ local d="$1" w="$2" out='[' first=1 nm op ex idx notes='[]'
-  # explicações dos exemplos (na ordem) p/ anexar a cada sample
+# _pairs <dir> <sample|hidden> <outfile> — escreve NDJSON (1 objeto/linha) em <outfile>.
+# Cada item sai via `jq --rawfile` (lê o teste de ARQUIVO) -> nada de conteúdo de teste no argv;
+# o chamador junta com `--slurpfile` (jq lê o arquivo). Evita estourar ARG_MAX em testes grandes.
+_pairs(){ local d="$1" w="$2" of="$3" nm op ex idx notes='[]'
+  : > "$of"
   [[ "$w" == sample && -f "$d/docs/sample-notes.json" ]] && { notes="$(jq -c . "$d/docs/sample-notes.json" 2>/dev/null)"; [[ -n "$notes" ]] || notes='[]'; }
   local names=(); shopt -s nullglob
   if [[ "$w" == sample ]]; then mapfile -t names < <(cd "$d/tests/input" 2>/dev/null && ls -1v sample* 2>/dev/null)
@@ -74,31 +77,37 @@ _pairs(){ local d="$1" w="$2" out='[' first=1 nm op ex idx notes='[]'
   for nm in "${names[@]}"; do
     op="$d/tests/output/$nm"; [[ -f "$op" ]] || op=/dev/null
     ex=''; if [[ "$w" == sample && "$nm" =~ ^sample([0-9]+)$ ]]; then idx=$(( ${BASH_REMATCH[1]} - 1 )); ex="$(jq -r --argjson i "$idx" '.[$i] // ""' <<<"$notes" 2>/dev/null)"; fi
-    [[ $first -eq 1 ]] || out+=','; first=0
-    out+="$(jq -n --arg nm "$nm" --rawfile i "$d/tests/input/$nm" --rawfile o "$op" --arg ex "$ex" \
-            '{name:$nm,input:$i,output:$o} + (if $ex=="" then {} else {explanation:$ex} end)')"
-  done; printf '%s]' "$out"; }
-_cat(){ local d="$1" c="$2" out='[' first=1 f
-  shopt -s nullglob
+    jq -nc --arg nm "$nm" --rawfile i "$d/tests/input/$nm" --rawfile o "$op" --arg ex "$ex" \
+       '{name:$nm,input:$i,output:$o} + (if $ex=="" then {} else {explanation:$ex} end)' >> "$of"
+  done; }
+# _cat <dir> <categoria> <outfile> — NDJSON (1 sol/linha) via --rawfile (sem código no argv).
+_cat(){ local d="$1" c="$2" of="$3" f
+  : > "$of"; shopt -s nullglob
   for f in "$d/sols/$c"/*; do [[ -f "$f" ]] || continue
-    [[ $first -eq 1 ]] || out+=','; first=0
-    out+="$(jq -n --arg fn "$(basename "$f")" --rawfile code "$f" '{filename:$fn,code:$code}')"
-  done; shopt -u nullglob; printf '%s]' "$out"; }
+    jq -nc --arg fn "$(basename "$f")" --rawfile code "$f" '{filename:$fn,code:$code}' >> "$of"
+  done; shopt -u nullglob; }
 enun_path(){ local e; for e in md org tex; do [[ -f "$1/docs/enunciado.$e" ]] && { printf '%s' "$1/docs/enunciado.$e"; return; }; done; printf '%s' "$1/docs/enunciado.md"; }
 pkg_to_json(){ local d="$1" enunf="" efmt=md
   local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; case "$ef" in *.org) efmt=org;; *.tex) efmt=tex;; *) efmt=md;; esac; break; }; done
+  # exemplos/testes/soluções vão p/ NDJSON em arquivos temporários e entram via --slurpfile (jq lê
+  # o arquivo) — assim os testes grandes NÃO viram argumentos de jq (ARG_MAX). enun/conf/editorial
+  # são pequenos (statement/markdown), seguem por --argjson.
+  local t; t="$(mktemp -d)"
+  _pairs "$d" sample "$t/exs"; _pairs "$d" hidden "$t/tss"
+  _cat "$d" good "$t/good"; _cat "$d" slow "$t/slow"; _cat "$d" wrong "$t/wrong"; _cat "$d" pass "$t/pass"; _cat "$d" upcoming "$t/up"
   jq -n --argjson enun "$(slurp "$enunf")" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
-        --argjson exs "$(_pairs "$d" sample)" --argjson tss "$(_pairs "$d" hidden)" \
-        --argjson good "$(_cat "$d" good)" --argjson slow "$(_cat "$d" slow)" --argjson wrong "$(_cat "$d" wrong)" \
-        --argjson pass "$(_cat "$d" pass)" --argjson up "$(_cat "$d" upcoming)" \
+        --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" \
+        --slurpfile good "$t/good" --slurpfile slow "$t/slow" --slurpfile wrong "$t/wrong" \
+        --slurpfile pass "$t/pass" --slurpfile up "$t/up" \
         --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --argjson editorial "$(slurp "$d/docs/solucao.md")" '
     {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
-    + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'; }
+    + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
+  rm -rf "$t"; }
 json_to_pkg(){ local j="$1" d="$2" id="$3"
   mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output"
   local efmt; efmt="$(jq -r '.format // .enunciado_format // "md"' <<<"$j")"; [[ "$efmt" =~ ^(md|org|tex)$ ]] || efmt=md
@@ -190,13 +199,19 @@ cmd_push(){ need_login
   [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new'/'moj clone')."
   local id repo prob; id="$(jq -r .id "$d/.moj-id")"; repo="$(jq -r .repo "$d/.moj-id")"; prob="$(jq -r .prob "$d/.moj-id")"
   if ! gate "$d"; then [[ $force -eq 1 ]] || die "pré-voo falhou (use --force só p/ rascunho privado)."; echo "  (--force: subindo mesmo assim)"; fi
-  local body; body="$(pkg_to_json "$d")"
+  # corpo via ARQUIVO (testes grandes estouram o argv do jq/curl): pkg_to_json escreve, jq injeta
+  # id/repo lendo o arquivo, e o POST vai por api_post_file (--data-binary @arquivo).
+  local bf bf2; bf="$(mktemp)"; bf2="$(mktemp)"
+  pkg_to_json "$d" > "$bf"
   if [[ "$(http_code GET "/problems/source?id=$(enc "$id")")" == 2* ]]; then
-    api POST "/problems/edit" "$(jq -c --arg id "$id" '. + {id:$id}' <<<"$body")" | jq -r '"enviado (edit): \(.id)  sha \(.sha)"'
+    jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
+    api_post_file "/problems/edit" "$bf2" | jq -r '"enviado (edit): \(.id)  sha \(.sha)"'
   else
     api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
-    api POST "/problems/create" "$(jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' <<<"$body")" | jq -r '"enviado (novo): \(.id)  sha \(.sha)"'
-  fi; echo "publique com 'moj publish $id' quando estiver pronto."; }
+    jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' "$bf" > "$bf2"
+    api_post_file "/problems/create" "$bf2" | jq -r '"enviado (novo): \(.id)  sha \(.sha)"'
+  fi
+  rm -f "$bf" "$bf2"; echo "publique com 'moj publish $id' quando estiver pronto."; }
 
 cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
   local id="$1" out="${2:-${1##*#}.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
