@@ -11,7 +11,10 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - Config por ambiente: `MOJ_URL` (default `https://moj.naquadah.com.br`), `MOJ_HOST` (header
   `Host` p/ teste local), `EDITOR`.
 - É um **cliente** da API — não tem lógica de julgamento própria. O formato de pacote é o do
-  `cdmoj` (ver `cdmoj/CLAUDE.md`).
+  `cdmoj` (ver `cdmoj/CLAUDE.md`, seção "Pacote canônico"). **Título = campo** (`.moj-id` `.title` →
+  `display_title`), **não** o `% Título` do texto (legado); por isso `push`/`upload` exigem título.
+- **Mexeu no formato do pacote?** A descrição em `README.md` ("Pacote do problema") tem de bater com
+  `cdmoj/docs/API.md` + `cdmoj/CLAUDE.md` + `mojtools/CLAUDE.md` — atualize as quatro no mesmo commit.
 - Um arquivo só (`moj`), `bash -euo pipefail`. `bash -n moj` antes de commitar.
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
 - **Doc junto com o código** (doc atrasada = bug): mudou subcomando/contrato? atualize o `README.md`, o

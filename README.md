@@ -62,16 +62,31 @@ bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
 
 ## Pacote do problema (arquivos)
 
+O **título é um CAMPO**, não uma linha no texto: localmente ele fica no `.moj-id` (`.title`); ao
+enviar vira `display_title` no `.moj-meta.json` do servidor e o render injeta o `<h1>`. Um `% Título`
+no topo do enunciado é **legado** (o render o ignora/remove). Por isso `moj push`/`upload` exigem um
+título (ver "Portão de qualidade").
+
 ```
 <prob>/
-  docs/enunciado.md     # % Título · ## Entrada · ## Saída · ## Observações
-  conf                  # TL/ulimits/STOPWHEN… (atalhos no 'moj edit', opção 8)
-  author · tags
-  tests/input|output/sample1   # exemplos (aparecem no enunciado)
-  tests/input|output/<nome>    # testes ocultos
-  sols/good|wrong|slow|pass|upcoming/<arquivo>   # soluções por categoria
-  .moj-id               # ponteiro local (id/repo/prob/título/coleções) — não é enviado
+  docs/enunciado.md         # enunciado (.md | .org | .tex); exige as seções ## Entrada e ## Saída.
+                            #   SEM "% Título" (o título é campo). Imagens: use base64 embutido.
+  docs/sample-notes.json    # (opcional) explicações dos exemplos, um por posição, NA ORDEM
+  docs/solucao.md           # (opcional) editorial — só p/ o SETTER, NÃO vai ao aluno
+  conf                      # TL/ulimits/STOPWHEN… (atalhos no 'moj edit', opção 8)
+  author                    # autor(es), 1 linha
+  tags                      # 1 tag por linha
+  tests/input/sample1  tests/output/sample1   # exemplos (pareados; aparecem no enunciado)
+  tests/input/<nome>   tests/output/<nome>    # testes ocultos (correção)
+  tests/score               # (opcional) grupos de pontuação por subtarefa
+  sols/{good,wrong,slow,pass,upcoming}/<arquivo>   # soluções por categoria (good = aceita)
+  scripts/                  # (opcional) correção especial (compile/compare por linguagem) — só via 'moj upload'
+  .moj-id                   # ponteiro LOCAL (id/repo/prob/TÍTULO/coleções/público) — NÃO é enviado
 ```
+
+No servidor os metadados ficam em `.moj-meta.json` (`display_title`, `public`, `collections`, `owner`) —
+gerado a partir do que você envia; você não o edita à mão. `moj push` manda os campos (title do `.moj-id`);
+`moj upload` sobe um `.tar`/`.zip` inteiro (o `.moj-meta.json`, com `display_title`, tem de estar no pacote).
 
 ## Quem pode criar
 
