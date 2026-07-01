@@ -81,6 +81,11 @@ compartilhar problemas existentes funciona para quem é dono/colaborador.
 
 ## Portão de qualidade
 
-`moj push` faz pré-voo local (enunciado, ≥1 exemplo, solução `good`). O portão **autoritativo**
-roda no servidor em `moj publish` (1 juiz valida HTML+exemplos+`good` aceita). Só então entra no
-treino livre; rascunho quebrado fica privado (`--force`).
+`moj push` faz pré-voo local (**título**, enunciado, ≥1 exemplo, solução `good`). O portão
+**autoritativo** roda no servidor em `moj publish` (1 juiz valida HTML+exemplos+`good` aceita). Só
+então entra no treino livre; rascunho quebrado fica privado (`--force`).
+
+**Título obrigatório:** `moj push` recusa enviar sem um título (o `.title` do `.moj-id` vazio ou o
+placeholder do `moj new`) — senão o problema fica com o **nome da pasta**. `moj upload` idem: exige
+`display_title` no `.moj-meta.json` do pacote. Escapes: `moj push --force` / `MOJ_ALLOW_NO_TITLE=1
+moj upload …` (o servidor então deriva o título do enunciado/pasta).

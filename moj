@@ -210,6 +210,12 @@ cmd_push(){ need_login
   local force=0 d="."; for a in "$@"; do case "$a" in --force) force=1;; *) d="$a";; esac; done
   [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new'/'moj clone')."
   local id repo prob; id="$(jq -r .id "$d/.moj-id")"; repo="$(jq -r .repo "$d/.moj-id")"; prob="$(jq -r .prob "$d/.moj-id")"
+  # TÍTULO obrigatório: sem ele o problema sai com o nome da pasta (o servidor deriva o slug).
+  local title; title="$(jq -r '.title // ""' "$d/.moj-id")"
+  if [[ -z "$title" || "$title" == "Título do Problema" ]]; then
+    [[ $force -eq 1 ]] || die "defina o TÍTULO antes de enviar — senão o problema fica com o nome da pasta ('$prob'). Use 'moj edit $id' (opção 1) ou edite o .title em .moj-id. (--force envia assim mesmo)"
+    echo "  ⚠ sem título — vai usar o nome da pasta ('$prob')."
+  fi
   if ! gate "$d"; then [[ $force -eq 1 ]] || die "pré-voo falhou (use --force só p/ rascunho privado)."; echo "  (--force: subindo mesmo assim)"; fi
   # corpo via ARQUIVO (testes grandes estouram o argv do jq/curl): pkg_to_json escreve, jq injeta
   # id/repo lendo o arquivo, e o POST vai por api_post_file (--data-binary @arquivo).
@@ -234,8 +240,24 @@ cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o proble
 cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
   local id="$1" out="${2:-${1##*#}.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
+# _tar_meta_title <arquivo> -> display_title do .moj-meta.json dentro do pacote (best-effort; "" se ausente)
+_tar_meta_title(){ local a="$1" d m t=""; d="$(mktemp -d)"
+  if [[ "$(head -c2 "$a" 2>/dev/null)" == "PK" ]]; then
+    have unzip && unzip -qq -o "$a" '*.moj-meta.json' -d "$d" >/dev/null 2>&1 || true
+  else
+    tar -xf "$a" -C "$d" --wildcards '*.moj-meta.json' >/dev/null 2>&1 || true
+  fi
+  m="$(find "$d" -name '.moj-meta.json' 2>/dev/null | head -1 || true)"
+  if [[ -n "$m" ]]; then t="$(jq -r '.display_title // ""' "$m" 2>/dev/null || true)"; fi
+  rm -rf "$d"; printf '%s' "$t"; }
 cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(tar.gz|tar.bz2|tar.zst|zip)>"
   [[ -f "$2" ]] || die "arquivo não encontrado: $2"
+  # TÍTULO obrigatório no pacote (senão o problema sai com o nome da pasta):
+  local mt; mt="$(_tar_meta_title "$2")"
+  if [[ -z "$mt" ]]; then
+    [[ "${MOJ_ALLOW_NO_TITLE:-}" == 1 ]] || die "o pacote não tem 'display_title' no .moj-meta.json — o problema sairia com o nome da pasta. Inclua display_title no .moj-meta.json do arquivo (ou rode com MOJ_ALLOW_NO_TITLE=1 p/ enviar assim)."
+    echo "  ⚠ sem display_title no pacote — o servidor vai derivar do enunciado/pasta."
+  fi
   local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; base64 -w0 < "$2" > "$b64"
   jq -n --arg id "$1" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
   api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
