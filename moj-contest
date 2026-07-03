@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# moj-contest — CLI de GESTÃO DE CONTEST do MOJ (camada 'contest'; `moj contest …` delega aqui).
+# Tudo pela API — os mesmos bloqueios da web valem (o corte é no servidor).
+#
+# SESSÕES: os comandos de criação/templates/export/duplicate/list/remove usam a sessão do
+# TREINO (`moj login`). Os comandos de ADMINISTRAÇÃO (settings/problems/users/…) exigem sessão
+# NAQUELE contest: `moj-contest login <cid>` com uma conta *.admin do contest (token por
+# contest em ~/.config/moj/token-<cid> — não atropela sua sessão de autoria).
+#
+#   moj-contest login <cid> [-u login]   moj-contest logout [<cid>]   moj-contest whoami
+#   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E]
+#   moj-contest list                     (contests criados por você)
+#   moj-contest show <cid>               moj-contest export <cid> [arquivo] [--full]
+#   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]
+#   moj-contest template list | show <nome> | save <nome> (--from-contest <cid> [--with-problems] | --from-file f.json) | rm <nome> | rename <nome> <novo>
+# Administração (exigem -c <cid> ou MOJ_CONTEST, e sessão .admin do contest):
+#   moj-contest -c <cid> settings [get]        moj-contest -c <cid> settings set k=v [k=v…]
+#   moj-contest -c <cid> extend <+min|epoch>
+#   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
+#                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
+#                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
+#                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
+#   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
+#                       | rm <login> | disable <login> | logout <login> | set-password-all <senha> [--include-disabled]
+#   moj-contest -c <cid> sessions | dashboard | score | audit [n] | access [AAAA-MM-DD]
+#   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
+#   moj-contest remove <cid>             (tira do ar; exige .admin do TREINO)
+# Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host p/ dev). Saída crua: --json.
+set -euo pipefail
+
+MOJ_TOOL=moj-contest
+# @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
+_MOJ_LIB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/core.sh"
+[[ -f "$_MOJ_LIB" ]] || { printf 'moj-contest: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
+source "$_MOJ_LIB"
+# @INLINE-END
+
+CONTEST_SET=0; [[ -n "${MOJ_CONTEST:-}" ]] && CONTEST_SET=1
+RAW=0
+# flags globais (antes do subcomando): -c <cid> | --json
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -c|--contest) [[ $# -ge 2 ]] || die "uso: -c <contest>"; CONTEST="$2"; CONTEST_SET=1; shift 2;;
+    --json) RAW=1; shift;;
+    *) break;;
+  esac
+done
+
+need_contest(){ [[ "$CONTEST_SET" == 1 ]] || die "informe o contest: -c <id> (ou MOJ_CONTEST=<id>)"; }
+qc(){ printf '?contest=%s' "$(enc "$CONTEST")"; }
+# api_t — chama a API com a sessão do TREINO (criação/templates/export/…), qualquer que seja -c
+api_t(){ local _old="$CONTEST"; CONTEST=treino; api "$@"; local rc=$?; CONTEST="$_old"; return $rc; }
+need_login_t(){ [[ -f "$(token_file treino)" ]] || die "faça 'moj login' (sessão do treino) primeiro."; }
+out(){ if [[ "$RAW" == 1 ]]; then cat; else jq -r "$1"; fi; }   # out <filtro-legível>  (stdin=json)
+
+# ---- sessão -------------------------------------------------------------------------------
+cmd_login(){ local cid="${1:-}" u=""
+  [[ -n "$cid" ]] || { need_contest; cid="$CONTEST"; }
+  shift || true
+  while [[ $# -gt 0 ]]; do case "$1" in -u|--user) u="$2"; shift 2;; *) die "opção desconhecida: $1";; esac; done
+  [[ -n "$u" ]] || read -rp "login ($cid): " u
+  local p; read -rsp "senha: " p; echo
+  local tok; tok="$(CONTEST="$cid" api POST "/auth/login?contest=$(enc "$cid")" "$(jq -n --arg u "$u" --arg p "$p" '{username:$u,password:$p}')" | jq -r '.token // empty')"
+  [[ -n "$tok" ]] || die "login falhou."
+  printf '%s' "$tok" | token_save "$cid"
+  echo "ok, logado em '$cid' como $u (token-$cid)."; }
+cmd_logout(){ local cid="${1:-$CONTEST}"; token_drop "$cid"; echo "deslogado de '$cid'."; }
+cmd_whoami(){ need_contest; need_login
+  api GET "/auth/status$(qc)" | out '"contest: '"$CONTEST"'  login: \(.login//"?")  nome: \(.name//"?")  admin: \(if .is_admin then "sim" else "não" end)"'; }
+
+# ---- criação / reuso (sessão do treino) ---------------------------------------------------
+cmd_create(){ need_login_t
+  local specf="" tpl="" id="" name="" start="" end="" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      --template) tpl="$1"; shift;;
+      --id) id="$1"; shift;;
+      --name) name="$1"; shift;;
+      --start) start="$1"; shift;;
+      --end) end="$1"; shift;;
+      *) specf="$a";;
+    esac
+  done
+  local spec='{}'
+  if [[ -n "$specf" ]]; then
+    if [[ "$specf" == - ]]; then spec="$(cat)"; else [[ -f "$specf" ]] || die "arquivo não existe: $specf"; spec="$(cat "$specf")"; fi
+    jq -e . >/dev/null 2>&1 <<<"$spec" || die "spec JSON inválido"
+    spec="$(jq -c 'del(.["_ajuda"]) | walk(if type=="object" then with_entries(select(.key|startswith("_")|not)) else . end)' <<<"$spec")"
+  fi
+  if [[ -n "$tpl" ]]; then
+    local t st; t="$(api_t GET "/treino/contest-create/templates?name=$(enc "$tpl")" | jq -c '.template.spec // {}')"
+    st="${start:-$(( ($(date +%s) / 3600 + 1) * 3600 ))}"
+    # absolutiza o template (duration/login_lead/freeze_before_end) e mescla o spec por cima
+    spec="$(jq -cn --argjson t "$t" --argjson s "$spec" --argjson st "$st" '
+      ($t + {start:$st, end:($st + ($t.duration // 10800))}) as $base
+      | ($base + (if $base.login_lead then {login_start:($st - $base.login_lead)} else {} end)
+               + (if $base.freeze_before_end then {freeze:($base.end - $base.freeze_before_end)} else {} end)
+         | del(.duration, .login_lead, .freeze_before_end)) + $s')"
+  fi
+  [[ -n "$id" ]] && spec="$(jq -c --arg v "$id" '.id=$v' <<<"$spec")"
+  [[ -n "$name" ]] && spec="$(jq -c --arg v "$name" '.name=$v' <<<"$spec")"
+  [[ -n "$start" ]] && spec="$(jq -c --argjson v "$start" '.start=$v' <<<"$spec")"
+  [[ -n "$end" ]] && spec="$(jq -c --argjson v "$end" '.end=$v' <<<"$spec")"
+  [[ "$(jq -r '.end // empty' <<<"$spec")" ]] || die "faltou o fim: --end <epoch> (ou spec/template com end/duration)"
+  local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
+  CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
+  rm -f "$tmp"; }
+cmd_list(){ need_login_t
+  api_t GET "/treino/contest-create/mine" | out '.contests[]? | "\(.id)\t\(.mode)\t\(.problems_count) probs\t\(.name)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_show(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest show <cid>"
+  api_t GET "/treino/contest-create/export?id=$(enc "$1")" | out '
+    "id: \(.id)\nnome: \(.name)\nmodo: \(.mode)\(if .priority then "  prioridade: \(.priority)" else "" end)\ninício: \(.start|todate)  fim: \(.end|todate)\nproblemas: \((.problems//[])|map("\(.letter)·\(.name)")|join("  "))\(if .languages then "\nlinguagens: \(.languages|join(" "))" else "" end)"'; }
+cmd_export(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest export <cid> [arquivo] [--full]"
+  local cid="$1" outf="" full="" a; shift || true
+  for a in "$@"; do case "$a" in --full) full='&full_statements=1';; *) outf="$a";; esac; done
+  [[ -n "$outf" ]] || outf="$cid-spec.json"
+  CONTEST=treino api_get_to_file "/treino/contest-create/export?id=$(enc "$cid")$full" "$outf"
+  echo "exportado: $outf ($(wc -c < "$outf") bytes)"; }
+cmd_duplicate(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]"
+  local from="$1" body='{}' a; shift
+  body="$(jq -cn --arg f "$from" '{from:$f}')"
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      --id) body="$(jq -c --arg v "$1" '.id=$v' <<<"$body")"; shift;;
+      --name) body="$(jq -c --arg v "$1" '.name=$v' <<<"$body")"; shift;;
+      --start) body="$(jq -c --argjson v "$1" '.start=$v' <<<"$body")"; shift;;
+      --end) body="$(jq -c --argjson v "$1" '.end=$v' <<<"$body")"; shift;;
+      *) die "opção desconhecida: $a";;
+    esac
+  done
+  api_t POST "/treino/contest-create/duplicate" "$body" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else "" end)\n  url: \(.url)"'; }
+cmd_template(){ need_login_t; local sub="${1:-list}"; shift || true
+  case "$sub" in
+    list|ls) api_t GET "/treino/contest-create/templates" | out '.templates[]? | "\(.name)\t\(.mode//"?")\t\(if .duration then "\(.duration/3600|floor)h" else "-" end)\t\(if .has_problems then "com problemas" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    show) [[ $# -ge 1 ]] || die "uso: template show <nome>"; api_t GET "/treino/contest-create/templates?name=$(enc "$1")" | { [[ "$RAW" == 1 ]] && cat || jq '.template'; };;
+    save) [[ $# -ge 1 ]] || die "uso: template save <nome> (--from-contest <cid> [--with-problems] | --from-file f.json)"
+      local name="$1" from="" file="" withp=false a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --from-contest) from="$1"; shift;;
+          --from-file) file="$1"; shift;;
+          --with-problems) withp=true;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      if [[ -n "$from" ]]; then
+        api_t POST "/treino/contest-create/templates" "$(jq -cn --arg n "$name" --arg f "$from" --argjson w "$withp" '{op:"save",name:$n,from_contest:$f,include_problems:$w}')" | out '"salvo: \(.name)"'
+      elif [[ -n "$file" ]]; then
+        [[ -f "$file" ]] || die "arquivo não existe: $file"
+        local tmp; tmp="$(mktemp)"
+        jq -c --arg n "$name" '{op:"save",name:$n,template:.}' "$file" > "$tmp" || { rm -f "$tmp"; die "JSON inválido: $file"; }
+        CONTEST=treino api_post_file "/treino/contest-create/templates" "$tmp" | out '"salvo: \(.name)"'; rm -f "$tmp"
+      else die "informe --from-contest <cid> ou --from-file <f.json>"; fi;;
+    rm|delete) [[ $# -ge 1 ]] || die "uso: template rm <nome>"; api_t POST "/treino/contest-create/templates" "$(jq -cn --arg n "$1" '{op:"delete",name:$n}')" | out '"removido: \(.name)"';;
+    rename) [[ $# -ge 2 ]] || die "uso: template rename <nome> <novo>"; api_t POST "/treino/contest-create/templates" "$(jq -cn --arg n "$1" --arg m "$2" '{op:"rename",name:$n,new_name:$m}')" | out '"renomeado p/: \(.name)"';;
+    *) die "template: sub desconhecido '$sub' (list|show|save|rm|rename)";;
+  esac; }
+cmd_remove(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest remove <cid>   (tira do ar; exige .admin do treino)"
+  local c; read -rp "confirme digitando o id ($1): " c || true; [[ "$c" == "$1" ]] || die "não confere."
+  api_t POST "/treino/admin/contest-remove" "$(jq -cn --arg c "$1" '{contest:$c}')" | out '"removido (lixeira): \(.trash // "ok")"'; }
+
+# ---- administração (sessão do contest) ----------------------------------------------------
+cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
+  case "$sub" in
+    get) api GET "/contest/admin/settings$(qc)" | { [[ "$RAW" == 1 ]] && cat || jq .; };;
+    set) [[ $# -ge 1 ]] || die "uso: settings set k=v [k=v…]  (ex.: show_code=true languages=c,cpp end=1790000000 name='Prova 1')"
+      local body='{}' kv k v
+      for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        [[ "$k" != "$kv" ]] || die "esperado k=v: $kv"
+        case "$k" in
+          languages|score_full_users) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k] = ($v|split(",")|map(select(length>0)))' <<<"$body")";;
+          name|locale|login_ua_substring) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
+          start|end|login_start|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
+          *) case "$v" in
+               true|false) body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
+               *) die "$k: esperado true/false (toggles) — ou use um dos campos texto/epoch";;
+             esac;;
+        esac
+      done
+      api POST "/contest/admin/settings$(qc)" "$body" | out '"salvo: \(.changed|join(", "))"';;
+    *) die "settings: use 'get' ou 'set k=v …'";;
+  esac; }
+cmd_extend(){ need_contest; need_login; [[ $# -ge 1 ]] || die "uso: extend <+min|epoch>"
+  local v="$1" end mins
+  if [[ "$v" =~ ^\+([0-9]+)$ ]]; then
+    mins="${BASH_REMATCH[1]}"   # capturar ANTES do api(): o =~ interno dele reseta BASH_REMATCH
+    end="$(api GET "/contest/admin/settings$(qc)" | jq -r '.end // 0')"
+    [[ "$end" =~ ^[0-9]+$ && "$end" -gt 0 ]] || die "fim atual desconhecido"
+    end=$(( end + mins * 60 ))
+  elif [[ "$v" =~ ^[0-9]+$ ]]; then end="$v"
+  else die "uso: extend <+min|epoch>"; fi
+  api POST "/contest/admin/settings$(qc)" "$(jq -cn --argjson e "$end" '{end:$e}')" | out '"novo fim: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"'"'; }
+cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls) api GET "/contest/admin/problems$(qc)" | out '.problems[]? | "\(.letter)\t\(.name)\t\(.problem_id)\t\(if (.languages//[])|length>0 then .languages|join(",") else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    add) [[ $# -ge 1 ]] || die "uso: problems add <id> [--name N] [--letter L]"
+      local id="$1" nm="" lt="" a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --name) nm="$1"; shift;; --letter) lt="$1"; shift;; *) die "opção: $a";; esac; done
+      api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$id" --arg nm "$nm" --arg lt "$lt" \
+        '{action:"add", problem:({bank_id:$id} + (if $nm != "" then {name:$nm} else {} end) + (if $lt != "" then {letter:$lt} else {} end))}')" \
+        | out '"ok: \((.problems//[])|length) problema(s)"';;
+    rm|remove) [[ $# -ge 1 ]] || die "uso: problems rm <letra>"
+      api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg l "$1" '{action:"remove",letter:$l}')" | out '"ok: \((.problems//[])|length) problema(s)"';;
+    rename) [[ $# -ge 2 ]] || die "uso: problems rename <letra> <nome>"
+      api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg l "$1" --arg n "$2" '{action:"rename",letter:$l,name:$n}')" | out '"ok"';;
+    reorder) [[ $# -ge 1 ]] || die "uso: problems reorder <L1> <L2> …"
+      api POST "/contest/admin/problems$(qc)" "$(printf '%s\n' "$@" | jq -R . | jq -cs '{action:"reorder",order:.}')" | out '.problems[]? | "\(.letter)\t\(.name)"';;
+    langs) [[ $# -ge 2 ]] || die "uso: problems langs <letra> <l1,l2|-> ('-' limpa: herda do contest)"
+      local larr='[]'; [[ "$2" != - ]] && larr="$(jq -cn --arg v "$2" '$v|split(",")|map(select(length>0))')"
+      api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg l "$1" --argjson v "$larr" '{action:"langs",letter:$l,languages:$v}')" | out '"ok: \(.problem_id) -> \(if (.languages|length)>0 then .languages|join(",") else "(herda do contest)" end)"';;
+    search) [[ $# -ge 1 ]] || die "uso: problems search <q> [--collection C]"
+      local q="$1" col="" a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --collection) col="&collection=$(enc "$1")"; shift;; *) die "opção: $a";; esac; done
+      api GET "/contest/admin/bank$(qc)&q=$(enc "$q")$col" | out '.problems[]? | "\(.id)\t\(.title)\t\(if (.collections//[])|length>0 then "📁 " + (.collections|join(",")) else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    draw) local tags="" colls="" count=6 diff=any match=any seed="" doadd=0 a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --tags) tags="$1"; shift;; --collections) colls="$1"; shift;;
+          --count) count="$1"; shift;; --difficulty) diff="$1"; shift;;
+          --match) match="$1"; shift;; --seed) seed="$1"; shift;; --add) doadd=1;;
+          *) die "opção: $a";;
+        esac
+      done
+      local qs="count=$(enc "$count")&difficulty=$(enc "$diff")&match=$(enc "$match")"
+      [[ -n "$tags" ]] && qs+="&tags=$(enc "$tags")"
+      [[ -n "$colls" ]] && qs+="&collections=$(enc "$(jq -cn --arg v "$colls" '$v|split(",")|map(select(length>0))')")"
+      [[ -n "$seed" ]] && qs+="&seed=$(enc "$seed")"
+      local r; r="$(api GET "/contest/admin/draw$(qc)&$qs")"
+      jq -r '"sorteados \(.drawn) de \(.candidates) candidatos (seed \(.seed))"' <<<"$r" >&2
+      if [[ "$doadd" == 1 ]]; then
+        local pid nm
+        while IFS=$'\t' read -r pid nm; do
+          [[ -n "$pid" ]] || continue
+          api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$pid" --arg nm "$nm" '{action:"add",problem:{bank_id:$id,name:$nm}}')" >/dev/null
+          echo "  + $pid ($nm)"
+        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)"' <<<"$r")
+      else
+        printf '%s' "$r" | out '.problems[]? | "\(.id)\t\(.bucket)\t\(.title)\t\(if (.collections//[])|length>0 then .collections|join(",") else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }
+      fi;;
+    *) die "problems: sub desconhecido '$sub' (ls|add|rm|rename|reorder|langs|search|draw)";;
+  esac; }
+cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls) api GET "/contest/admin/users$(qc)" | out '.users[]? | "\(.login)\t\(.fullname//"")\t\(if .admin then "admin" elif .disabled then "DESABILITADO" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    add|reset) [[ $# -ge 1 ]] || die "uso: users $sub <login> [--pass P] [--name N] [--email E]"
+      local login="$1" pw="" nm="" em="" a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --pass) pw="$1"; shift;; --name) nm="$1"; shift;; --email) em="$1"; shift;; *) die "opção: $a";; esac; done
+      api POST "/contest/admin/user-add$(qc)" "$(jq -cn --arg l "$login" --arg p "$pw" --arg n "$nm" --arg e "$em" \
+        '{login:$l} + (if $p != "" then {password:$p} else {} end) + (if $n != "" then {fullname:$n} else {} end) + (if $e != "" then {email:$e} else {} end)')" \
+        | out '"\(.user.login)  senha: \(.user.password)"';;
+    rm|remove) [[ $# -ge 1 ]] || die "uso: users rm <login>"
+      api POST "/contest/admin/user-remove$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"removido: \(.login)"';;
+    disable) [[ $# -ge 1 ]] || die "uso: users disable <login>"
+      api POST "/contest/admin/user-disable$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"desabilitado: \(.login) (\(.sessions_removed) sessão(ões) derrubadas)"';;
+    logout) [[ $# -ge 1 ]] || die "uso: users logout <login>"
+      api POST "/contest/admin/logout-user$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"sessões removidas: \(.sessions_removed)"';;
+    set-password-all) [[ $# -ge 1 ]] || die "uso: users set-password-all <senha> [--include-disabled]"
+      local pw="$1" inc=false a; shift
+      for a in "$@"; do [[ "$a" == --include-disabled ]] && inc=true; done
+      local c; read -rp "trocar a senha de TODOS os não-privilegiados de '$CONTEST'? (digite sim) " c || true
+      [[ "$c" == sim ]] || die "abortado."
+      api POST "/contest/admin/users-set-password$(qc)" "$(jq -cn --arg p "$pw" --argjson i "$inc" '{password:$p,include_disabled:$i}')" | out '"atualizados: \(.count)"';;
+    *) die "users: sub desconhecido '$sub' (ls|add|reset|rm|disable|logout|set-password-all)";;
+  esac; }
+cmd_sessions(){ need_contest; need_login
+  api GET "/contest/admin/sessions$(qc)" | out '.sessions[]? | "\(.login)\t\(.ip//"")\t\(.login_at|todate)\t\(if .multi_ip or .multi_ua then "⚠" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_dashboard(){ need_contest; need_login
+  api GET "/contest/admin/dashboard$(qc)" | out '"juízes: \(.judges.online)/\(.judges.total) online, \(.judges.busy) ocupados, fila \(.judges.queue_depth)\nsubmissões: \(.submissions.total) (pendentes \(.submissions.pending), maior espera \(.submissions.max_wait_s)s)\nresposta: média \(.submissions.response.avg_s)s  p95 \(.submissions.response.p95_s)s"'; }
+cmd_score(){ need_contest; api GET "/contest/score$(qc)"; }
+cmd_audit(){ need_contest; need_login; local n="${1:-30}"
+  api GET "/contest/admin/audit-log$(qc)&limit=$(enc "$n")" | out '.events[]? | "\(.time|todate)\t\(.kind)\t\(.who//"")\t\(.action//"")\t\(.details//"")"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_access(){ need_contest; need_login; local day="${1:-$(date +%F)}"
+  api GET "/contest/admin/access-log$(qc)&day=$(enc "$day")" | out '.entries[]? | "\(.time|todate)\t\(.login//"")\t\(.ip//"")"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_news(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls) api GET "/contest/news$(qc)" | out '.items[]? | "\(.id)\t\(.date|todate)\t\(.title)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    add) [[ $# -ge 1 ]] || die "uso: news add <título> [texto]"
+      api POST "/contest/admin/news$(qc)" "$(jq -cn --arg t "$1" --arg x "${2:-}" '{action:"add",title:$t,text:$x}')" | out '"publicada: \(.id // "ok")"';;
+    rm|remove) [[ $# -ge 1 ]] || die "uso: news rm <id>"
+      api POST "/contest/admin/news$(qc)" "$(jq -cn --arg i "$1" '{action:"remove",id:$i}')" | out '"removida"';;
+    *) die "news: sub desconhecido '$sub' (ls|add|rm)";;
+  esac; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
+  create) cmd_create "$@";; list|ls) cmd_list "$@";; show) cmd_show "$@";;
+  export) cmd_export "$@";; duplicate|dup) cmd_duplicate "$@";; template|tpl) cmd_template "$@";;
+  remove) cmd_remove "$@";;
+  settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
+  problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";;
+  sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
+  audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
+  help|-h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//';;
+  *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
+esac

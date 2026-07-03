@@ -98,6 +98,28 @@ No servidor os metadados ficam em `.moj-meta.json` (`display_title`, `public`, `
 gerado a partir do que você envia; você não o edita à mão. `moj push` manda os campos (title do `.moj-id`);
 `moj upload` sobe um `.tar`/`.zip` inteiro (o `.moj-meta.json`, com `display_title`, tem de estar no pacote).
 
+## Gestão de contest (`moj-contest` / `moj contest …`)
+
+CLI da camada de **contest** — cria, reaproveita e administra contests pela API (os mesmos
+bloqueios da web valem; o corte é no servidor). Sessões: criação/templates/export/duplicate/
+list/remove usam a sessão do **treino** (`moj login`); administração exige sessão **naquele
+contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — token por contest em
+`~/.config/moj/token-<cid>`). O contest-alvo vem de `-c <cid>` ou `MOJ_CONTEST`.
+
+| Comando | O que faz |
+|---|---|
+| `login <cid> [-u login]` · `logout [<cid>]` · `whoami` | sessão por contest |
+| `create [spec.json\|-] [--template N] [--id --name --start --end]` | cria (spec JSON, template salvo, ou ambos) |
+| `list` · `show <cid>` | seus contests · resumo de um |
+| `export <cid> [arq] [--full]` · `duplicate <cid> [--id --name --start --end]` | spec p/ arquivo (sem credenciais) · cópia (sem usuários) |
+| `template list\|show\|save <nome> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | templates nomeados no servidor |
+| `settings get` · `settings set k=v …` · `extend <+min\|epoch>` | configurações do contest |
+| `problems ls\|add <id>\|rm <letra>\|rename\|reorder\|langs <letra> <l1,l2\|->` | problemas do contest |
+| `problems search <q> [--collection C]` · `problems draw [--collections "A,B"] [--tags a,b] [--count N] [--difficulty d] [--seed s] [--add]` | banco público: busca e **sorteio por coleção/tag/dificuldade** (`--add` já adiciona) |
+| `users ls\|add\|reset\|rm\|disable\|logout <login>\|set-password-all <senha>` | usuários (troca geral pede confirmação) |
+| `sessions` · `dashboard` · `score` · `audit [n]` · `access [dia]` · `news ls\|add\|rm` | operação da prova |
+| `remove <cid>` | tira do ar (lixeira; exige `.admin` do treino) |
+
 ## Quem pode criar
 
 Criar problemas / orgs / coleções segue a **mesma permissão de criar contests** (admin do treino

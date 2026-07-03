@@ -65,7 +65,7 @@ api_post_file(){ # api_post_file PATH BODYFILE -> POST grande (corpo via arquivo
 api_get_to_file(){ local p="$1" dest="$2" auth=() code tf; tf="$(token_file)"
   [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
   code="$(curl -sS -o "$dest" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
-  [[ "$code" =~ ^2 ]] || { rm -f "$dest"; die "download falhou${code:+ ($code)}"; }
+  [[ "$code" =~ ^2 ]] || { [[ -f "$dest" ]] && rm -f "$dest"; die "download falhou${code:+ ($code)}"; }
 }
 enc(){ jq -rn --arg s "$1" '$s|@uri'; }
 slurp(){ [[ -f "$1" ]] && jq -Rs . < "$1" || printf '""'; }
