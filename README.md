@@ -14,6 +14,15 @@ Precisa de `bash`, `curl`, `jq` (e um editor para `moj edit`, via `$EDITOR`). Ba
 curl -fsSL https://moj.naquadah.com.br/moj -o ~/.local/bin/moj && chmod +x ~/.local/bin/moj
 ```
 
+Para a camada de **gestão de contest** (`moj contest …` / `moj-contest`), baixe também:
+
+```bash
+curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest
+```
+
+(Os arquivos servidos são auto-contidos — gerados por `mkdist.sh` a partir de `lib/core.sh` +
+cada camada. Rodando do repo, os scripts sourceiam `lib/core.sh` direto.)
+
 Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`. Para testar local:
 `export MOJ_URL=http://127.0.0.1:8080 MOJ_HOST=moj.charge.naquadah.com.br`.
 

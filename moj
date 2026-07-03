@@ -23,55 +23,17 @@
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
 #                  | members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]
+#   moj contest …                 (GESTÃO DE CONTEST — delega ao moj-contest; `moj contest help`)
 # Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local),
 #         EDITOR (editor de texto; default nano/vi).
 set -euo pipefail
 
-MOJ_URL="${MOJ_URL:-https://moj.naquadah.com.br}"
-CONTEST="${MOJ_CONTEST:-treino}"
-CFG="${MOJ_CONFIG_DIR:-$HOME/.config/moj}"
-TOKENF="$CFG/token"
-ED="${EDITOR:-${VISUAL:-}}"; [[ -n "$ED" ]] || { command -v nano >/dev/null && ED=nano || ED=vi; }
-HDR=(); [[ -n "${MOJ_HOST:-}" ]] && HDR=(-H "Host: $MOJ_HOST")
-die(){ printf 'moj: %s\n' "$*" >&2; exit 1; }
-have(){ command -v "$1" >/dev/null 2>&1; }
-have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
-
-api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die)
-  local m="$1" p="$2" data="${3:-}" auth=() out code tmp; tmp="$(mktemp)"
-  [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  if [[ -n "$data" ]]; then code="$(printf '%s' "$data" | curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data-binary @- "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
-  else code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"; fi
-  out="$(cat "$tmp")"; rm -f "$tmp"
-  [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
-  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
-}
-# cache local de GET: devolve o que está salvo se ainda fresco (TTL s); senão busca e grava.
-# Evita repetir round-trips caros (o servidor só responde por IPv6; cada conexão custa segundos
-# em redes com IPv6 lento). MOJ_NO_CACHE=1 ignora o cache.
-api_get_cached(){ local ttl="$1" p="$2" cf age out
-  [[ "${MOJ_NO_CACHE:-0}" == 1 ]] && { api GET "$p"; return; }
-  cf="$CFG/cache/$(printf '%s' "$p" | md5sum 2>/dev/null | cut -c1-24).json"
-  age=$(( $(date +%s) - $(stat -c %Y "$cf" 2>/dev/null || echo 0) ))
-  if [[ -f "$cf" ]] && (( age < ttl )); then cat "$cf"; return 0; fi
-  out="$(api GET "$p")" || return 1
-  ( umask 077; mkdir -p "$(dirname "$cf")" 2>/dev/null; printf '%s' "$out" > "$cf" ) 2>/dev/null
-  printf '%s' "$out"; }
-http_code(){ local m="$1" p="$2" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
-need_login(){ [[ -f "$TOKENF" ]] || die "faça 'moj login' primeiro."; }
-api_post_file(){ # api_post_file PATH BODYFILE  -> POST grande (corpo via arquivo; evita ARG_MAX)
-  local p="$1" f="$2" auth=() out code tmp; tmp="$(mktemp)"
-  [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
-  code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X POST -H 'Content-Type: application/json' --data-binary @"$f" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
-  out="$(cat "$tmp")"; rm -f "$tmp"
-  [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
-  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
-}
-enc(){ jq -rn --arg s "$1" '$s|@uri'; }
-slurp(){ [[ -f "$1" ]] && jq -Rs . < "$1" || printf '""'; }
-pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
-ask(){ local p="$1" def="${2:-}" v; read -e -i "$def" -r -p "$p" v </dev/tty || true; printf '%s' "$v"; }
+MOJ_TOOL=moj
+# @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
+_MOJ_LIB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/core.sh"
+[[ -f "$_MOJ_LIB" ]] || { printf 'moj: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
+source "$_MOJ_LIB"
+# @INLINE-END
 
 # ---- pacote <-> JSON (fidelidade total) ---------------------------------------------------
 # _pairs <dir> <sample|hidden> <outfile> — escreve NDJSON (1 objeto/linha) em <outfile>.
@@ -146,11 +108,10 @@ conf_set(){ local d="$1" k="$2" v="$3" line found=0 tmp; tmp="$(mktemp)"
   [[ $found -eq 0 && -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; mv -f "$tmp" "$d/conf"; }
 
 # ---- comandos simples ---------------------------------------------------------------------
-cmd_login(){ mkdir -p "$CFG"; chmod 700 "$CFG"
-  local u p; read -rp "login MOJ: " u; read -rsp "senha: " p; echo
+cmd_login(){ local u p; read -rp "login MOJ: " u; read -rsp "senha: " p; echo
   local tok; tok="$(api POST "/auth/login?contest=$CONTEST" "$(jq -n --arg u "$u" --arg p "$p" '{username:$u,password:$p}')" | jq -r '.token // empty')"
-  [[ -n "$tok" ]] || die "login falhou."; ( umask 077; printf '%s' "$tok" > "$TOKENF" ); echo "ok, logado como $u."; }
-cmd_logout(){ rm -f "$TOKENF"; echo "deslogado."; }
+  [[ -n "$tok" ]] || die "login falhou."; printf '%s' "$tok" | token_save; echo "ok, logado como $u."; }
+cmd_logout(){ token_drop; echo "deslogado."; }
 cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"login: \(.login//"?")  nome: \(.name//"?")"'
   local c; c="$(http_code GET "/treino/contest-create/permission")"; [[ "$c" == 200 ]] && api GET "/treino/contest-create/permission" | jq -r '"pode criar problemas: \(if .can_create then "sim" else "não" end)\(if .reason then " (\(.reason))" else "" end)"'; }
 cmd_repos(){ need_login; api_get_cached 60 "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
@@ -302,7 +263,7 @@ cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o proble
   [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
   api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
 cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
-  local id="$1" out="${2:-${1##*#}.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
+  local id="$1" out="${2:-${1##*#}.tar.gz}" auth=() tf; tf="$(token_file)"; [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
 # _tar_meta_title <arquivo> -> display_title do .moj-meta.json dentro do pacote (best-effort; "" se ausente)
 _tar_meta_title(){ local a="$1" d m t=""; d="$(mktemp -d)"
@@ -326,7 +287,7 @@ cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(
   jq -n --arg id "$1" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
   api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_export(){ need_login; [[ $# -ge 1 ]] || die "uso: moj export <id> [arquivo.tar.gz]   (pacote ICPC/Kattis)"
-  local id="$1" out="${2:-${1##*#}.icpc.tar.gz}" auth=(); [[ -f "$TOKENF" ]] && auth=(-H "Authorization: Bearer $(cat "$TOKENF")")
+  local id="$1" out="${2:-${1##*#}.icpc.tar.gz}" auth=() tf; tf="$(token_file)"; [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
   curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/export?id=$(enc "$id")" -o "$out" || die "falha ao exportar"; echo "exportado (ICPC/Kattis): $out"; }
 cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz|zip)> <pasta> [prob]   (ICPC/Kattis -> MOJ)"
   [[ -f "$1" ]] || die "arquivo não encontrado: $1"
@@ -444,8 +405,18 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
     esac
   done; }
 
+# camada agregadora: `moj contest …` delega ao moj-contest (ao lado do script ou no PATH).
+# Padrão p/ camadas futuras: `moj <camada> …` -> executável moj-<camada>.
+exec_layer(){ local layer="$1"; shift
+  local d; d="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  [[ -x "$d/moj-$layer" ]] && exec "$d/moj-$layer" "$@"
+  have "moj-$layer" && exec "moj-$layer" "$@"
+  die "camada '$layer' não instalada: curl -fLO $MOJ_URL/moj-$layer && chmod +x moj-$layer"
+}
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
+  contest) exec_layer contest "$@";;
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
