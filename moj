@@ -17,7 +17,7 @@
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id>
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
-#   moj org list|create|members|public   (orgs: quem edita + trava de público; privada por padrão)
+#   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
 #   moj collection ls|create|show|add|remove|rename|delete  (coleções = tags de agrupamento, m:n)
 #   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
@@ -192,7 +192,9 @@ cmd_org(){ need_login; local sub="${1:-list}"; shift || true
       local name="$1" onoff="$2" v=false; [[ "$onoff" == on ]] && v=true
       api POST "/orgs/set-public-allowed" "$(jq -n --arg n "$name" --argjson v "$v" '{name:$n, public_allowed:$v}')" \
         | jq -r '"org \(.name): permite público = \(.public_allowed)\(if (.unpublished//0)>0 then " (despublicou \(.unpublished))" else "" end)"' ;;
-    *) die "uso: moj org list|create|members|public" ;;
+    rm|remove|delete) [[ $# -ge 1 ]] || die "uso: moj org rm <nome>   (só org VAZIA; a implícita não sai)"
+      api POST "/orgs/delete" "$(jq -n --arg n "$1" '{name:$n}')" | jq -r '"org removida: \(.name)"' ;;
+    *) die "uso: moj org list|create|members|public|rm" ;;
   esac; }
 cmd_mv(){ need_login; [[ $# -ge 2 ]] || die "uso: moj mv <id> <org-destino>   (só rascunho; muda o id p/ <org>#<prob>)"
   api POST "/problems/move" "$(jq -n --arg id "$1" --arg to "$2" '{id:$id, to_org:$to}')" | jq -r '"movido: \(.from) -> \(.id)"'; }
