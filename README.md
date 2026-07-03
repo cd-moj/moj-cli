@@ -38,7 +38,7 @@ O menu espelha os campos da página — escolha um número/letra para editar:
 Enunciado e código de solução abrem no seu `$EDITOR`; título/autor/tags são campos editáveis;
 exemplos/testes/soluções têm submenus de adicionar/editar/remover; `conf` tem atalhos para as
 opções comuns (calibrafactor, ULIMITS, CALIBRATIONTL, ALLOWPARALLELTEST, STOPWHEN…) + edição
-bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
+bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria uma nova coleção.
 
 ## Comandos
 
@@ -59,9 +59,7 @@ bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
 | `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
 | `moj org list\|create\|members\|public` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda) |
 | `moj mv <id> <org>` | move um **rascunho** p/ outra org (muda o id `<org>#<prob>`; bloqueia se público/em uso) |
-| `moj collection ls` | coleções (setters, admins, quais você gerencia) |
-| `moj collection create <nome> [--members a,b] [--admins c,d]` | cria coleção (competição/curso) |
-| `moj collection members <nome> [--add] [--remove] [--admins-add] [--admins-remove]` | gerencia o grupo |
+| `moj collection ls\|show\|create\|add\|remove\|rename\|delete` | **coleções = TAGS de agrupamento** (m:n, ORTOGONAL à org; o nome pode ter **espaços**). `create "<nome>"`, `add/remove <id> "<nome>"` (marca/desmarca no problema), `show "<nome>"` (browse), `rename`/`delete` (dono da coleção) |
 
 ## Pacote do problema (arquivos)
 
@@ -93,7 +91,7 @@ gerado a partir do que você envia; você não o edita à mão. `moj push` manda
 
 ## Quem pode criar
 
-Criar problemas/pastas/coleções segue a **mesma permissão de criar contests** (admin do treino
+Criar problemas / orgs / coleções segue a **mesma permissão de criar contests** (admin do treino
 libera por usuário ou por nº de problemas resolvidos). `moj whoami` mostra se você pode; editar e
 compartilhar problemas existentes funciona para quem é dono/colaborador.
 

@@ -5,17 +5,20 @@
 #   • ARQUIVOS LOCAIS (edite com seu editor favorito): moj clone <id> ; … ; moj push
 #
 #   moj login | whoami | logout
-#   moj ls [mine|shared|public]   moj repos   moj mkdir <pasta>
+# Conceitos: ORG = quem edita + prefixo do id <org>#<prob> (acesso, 1 por problema);
+#            COLEÇÃO = rótulo de agrupamento (tag, VÁRIAS por problema, pode ter espaços).
+#   moj ls [mine|shared|public]   moj repos   moj mkdir <org>   (mkdir = criar org)
 #   moj board                     (painel: seus problemas + o que precisa revisar)
 #   moj status [<id>] | check <id>  (sem id: saúde do sistema; com id: QA do problema —
 #                                    validação, time-limits por juiz, solução good sem TL)
-#   moj new <pasta> <prob>        moj clone <id> [dir]            moj info <id>
+#   moj new <org> <prob>          moj clone <id> [dir]            moj info <id>
 #   moj edit <id|dir>             moj test [dir]                  moj push [dir] [--force]
 #   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id>
-#   moj share <pasta> <login>     moj unshare <pasta> <login>
+#   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
 #   moj org list|create|members|public   (orgs: quem edita + trava de público; privada por padrão)
+#   moj collection ls|create|show|add|remove|rename|delete  (coleções = tags de agrupamento, m:n)
 #   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
@@ -166,8 +169,8 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
   api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" \
     | jq -r 'if .public then "\(.id): PÚBLICO — o servidor VALIDA + CALIBRA (reqid \(.reqid // "?")). Acompanhe com: moj check \(.id)" else "\(.id): despublicado (saiu do treino livre)" end'; }
 cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
-cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
-cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
+cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <org> <login>   (adiciona membro à org — quem edita)"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"membros da org \(.repo): \(.collaborators|join(", "))"'; }
+cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <org> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"membros da org \(.repo): \(.collaborators|join(", "))"'; }
 # gestão de ORGS (o <org> do id <org>#<prob>): membros escrevem em qualquer problema; admins gerem a
 # trava de público (privada = problemas nunca ficam públicos). Cada usuário tem a org implícita <login>.
 cmd_org(){ need_login; local sub="${1:-list}"; shift || true
@@ -245,7 +248,7 @@ cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
   jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' "$st" 2>/dev/null || true
   rm -f "$gt" "$st"; }
 
-cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <pasta> <prob>"
+cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <org> <prob>"
   local repo="$1" prob="$2" d="$2"; [[ -e "$d" ]] && die "já existe ./$d"
   local me; me="$(api GET "/auth/status?contest=$CONTEST" | jq -r '.name // .login // ""')"
   local tmpl; tmpl="$(jq -n --arg a "$me" '{title:"Título do Problema", author:$a, tags:["iniciante"], collections:[], public:false,
@@ -333,23 +336,26 @@ cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs"
   local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
+# COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
+# pode ter ESPAÇOS. Marcar um problema numa coleção exige que ela EXISTA (crie antes).
 cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
-    ls) api GET "/problems/collections" | jq -r '.collections[]? | "  \(.name)  [\(.count) probs]  dono:\(.owner//"—")  setters:\((.members//[])|join(","))  admins:\((.admins//[])|join(","))\(if .can_manage then "  *você gerencia*" else "" end)"';;
-    create) [[ $# -ge 1 ]] || die "uso: moj collection create <nome> [--members a,b] [--admins c,d]"
-      local name="$1"; shift; local mem="" adm=""
-      while [[ $# -gt 0 ]]; do case "$1" in --members) mem="$2"; shift;; --admins) adm="$2"; shift;; esac; shift; done
-      api POST "/problems/collection-create" "$(jq -n --arg n "$name" --arg m "$mem" --arg a "$adm" '{name:$n, members:($m|split(",")|map(select(length>0))), admins:($a|split(",")|map(select(length>0)))}')" \
-        | jq -r '"coleção \(.name): setters [\(.members|join(","))] admins [\(.admins|join(","))]"';;
-    members) [[ $# -ge 1 ]] || die "uso: moj collection members <nome> [--add a] [--remove b] [--admins-add c] [--admins-remove d]"
-      local name="$1"; shift
-      [[ $# -eq 0 ]] && { api GET "/problems/collection-members?name=$(enc "$name")" | jq -r '"dono: \(.owner)\nsetters: \((.members//[])|join(", "))\nadmins: \((.admins//[])|join(", "))\ngerencio: \(.can_manage)"'; return; }
-      local add="" rem="" aadd="" arem=""
-      while [[ $# -gt 0 ]]; do case "$1" in --add) add="$2"; shift;; --remove) rem="$2"; shift;; --admins-add) aadd="$2"; shift;; --admins-remove) arem="$2"; shift;; esac; shift; done
-      api POST "/problems/collection-members" "$(jq -n --arg n "$name" --arg a "$add" --arg r "$rem" --arg aa "$aadd" --arg ar "$arem" \
-        '{name:$n, add:($a|split(",")|map(select(length>0))), remove:($r|split(",")|map(select(length>0))), admins_add:($aa|split(",")|map(select(length>0))), admins_remove:($ar|split(",")|map(select(length>0)))}')" \
-        | jq -r '"setters: \((.members//[])|join(", "))\nadmins: \((.admins//[])|join(", "))"';;
-    *) die "subcomando de coleção: ls | create | members";;
+    ls) api GET "/problems/collections" | jq -r '.collections[]? | "  \(.name)\t[\(.count) probs, \(.public) púb]\tdono:\(.owner//"—")\(if .can_manage then "  *gerencio*" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    create|new) [[ $# -ge 1 ]] || die "uso: moj collection create \"<nome livre>\"  (pode ter espaços)"
+      api POST "/problems/collection-create" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"coleção criada: \(.name) (dono \(.owner))"';;
+    show|browse) [[ $# -ge 1 ]] || die "uso: moj collection show \"<nome>\""
+      api GET "/problems/collection?name=$(enc "$*")" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    add) [[ $# -ge 2 ]] || die "uso: moj collection add <id> \"<coleção>\""
+      local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")" | jq -c '.collections // []')"
+      api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:(($c+[$n])|unique)}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
+    remove|rm) [[ $# -ge 2 ]] || die "uso: moj collection remove <id> \"<coleção>\""
+      local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")" | jq -c '.collections // []')"
+      api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:($c|map(select(.!=$n)))}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
+    rename) [[ $# -ge 2 ]] || die "uso: moj collection rename \"<nome>\" \"<novo>\""
+      api POST "/problems/collection-rename" "$(jq -n --arg n "$1" --arg t "$2" '{name:$n, to:$t}')" | jq -r '"renomeada: \(.from) -> \(.name) (\(.retagged) problemas re-taggeados)"';;
+    delete|del) [[ $# -ge 1 ]] || die "uso: moj collection delete \"<nome>\""
+      api POST "/problems/collection-delete" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"excluída: \(.name) (\(.untagged) problemas destaggeados)"';;
+    *) die "subcomando de coleção: ls | create | show | add | remove | rename | delete";;
   esac; }
 
 # ---- editor interativo (como os campos da página) -----------------------------------------
@@ -398,13 +404,13 @@ edit_conf(){ local d="$1"
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }
+# coleções = TAGS de agrupamento (curadas). Marque só as EXISTENTES; "criar" registra uma nova coleção.
 edit_colls(){ local d="$1" cur; cur="$(jq -r '(.collections//[])|join(",")' "$d/.moj-id")"
-  echo; echo "Coleções atuais: ${cur:-—}"; echo "  disponíveis:"; api GET "/problems/collections" | jq -r '.collections[]? | "    \(.name)\(if .can_manage then " *gerencio*" else "" end)"'
-  case "$(ask '  [s]et lista [c]riar nova [m]embros <nome> [v]oltar: ')" in
-    s) mid_set "$d" --argjson c "$(jq -n --arg s "$(ask '  coleções (vírgula): ' "$cur")" '$s|split(",")|map(select(length>0))')" '.collections=$c';;
-    c) local n m a; n="$(ask '  nome: ')"; m="$(ask '  setters (vírgula): ')"; a="$(ask '  co-admins (vírgula): ')"
-       [[ -n "$n" ]] && { cmd_collection create "$n" --members "$m" --admins "$a"; mid_set "$d" --arg n "$n" '.collections=((.collections//[])+[$n]|unique)'; };;
-    m) local n; n="$(ask '  coleção: ')"; [[ -n "$n" ]] && cmd_collection members "$n";;
+  echo; echo "Coleções atuais: ${cur:-—}"; echo "  disponíveis (marque só as existentes):"; api GET "/problems/collections" | jq -r '.collections[]? | "    \(.name)  [\(.count)]\(if .can_manage then " *gerencio*" else "" end)"'
+  case "$(ask '  [s]et lista (vírgula) [c]riar nova coleção [v]oltar: ')" in
+    s) mid_set "$d" --argjson c "$(jq -n --arg s "$(ask '  coleções (vírgula): ' "$cur")" '$s|split(",")|map(select(length>0))|map(gsub("^ +| +$";""))')" '.collections=$c';;
+    c) local n; n="$(ask '  nome da coleção (pode ter espaços): ')"
+       [[ -n "$n" ]] && { cmd_collection create "$n"; mid_set "$d" --arg n "$n" '.collections=((.collections//[])+[$n]|unique)'; };;
   esac; }
 cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edit <id|dir>"
   [[ -r /dev/tty ]] || die "moj edit é interativo — precisa de um terminal."
