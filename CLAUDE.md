@@ -6,8 +6,11 @@ Espelha o editor web falando com a mesma API (`/api/v1/problems/*`). Repo git pr
 Workspace multi-repo: ver `../CLAUDE.md`.
 
 - Dois fluxos: **interativo** (`moj edit <id|pasta>`, campos como na web) ou **arquivos locais**
-  (`moj clone <id>` … edita … `moj push`). Também: `login/whoami`, `ls`, `new`, `test`,
-  `preview`, `download/upload`, `public`, `publish`, `calibrate`, `share`, `collection`.
+  (`moj clone <id>` … edita … `moj push`). Também: `login/whoami`, `ls`, `board` (painel dos seus
+  problemas + o que revisar), `new`, `test`, `preview`, `download/upload`, `public`, `publish`
+  (público => o servidor **valida + calibra**, via `set-public`), `calibrate`, `status [<id>]` /
+  `check <id>` (QA: validação + TL por juiz + solução good sem TL / falhou em todas as máquinas),
+  `share`, `collection`.
 - Config por ambiente: `MOJ_URL` (default `https://moj.naquadah.com.br`), `MOJ_HOST` (header
   `Host` p/ teste local), `EDITOR`.
 - É um **cliente** da API — não tem lógica de julgamento própria. O formato de pacote é o do

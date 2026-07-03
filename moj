@@ -5,11 +5,15 @@
 #   • ARQUIVOS LOCAIS (edite com seu editor favorito): moj clone <id> ; … ; moj push
 #
 #   moj login | whoami | logout
-#   moj ls [mine|shared|public]   moj repos   moj mkdir <pasta>   moj status [<id>]
+#   moj ls [mine|shared|public]   moj repos   moj mkdir <pasta>
+#   moj board                     (painel: seus problemas + o que precisa revisar)
+#   moj status [<id>] | check <id>  (sem id: saúde do sistema; com id: QA do problema —
+#                                    validação, time-limits por juiz, solução good sem TL)
 #   moj new <pasta> <prob>        moj clone <id> [dir]            moj info <id>
 #   moj edit <id|dir>             moj test [dir]                  moj push [dir] [--force]
 #   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
-#   moj public <id> on|off [--yes]   moj publish <id>             moj calibrate <id>
+#   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
+#   moj calibrate <id>
 #   moj share <pasta> <login>     moj unshare <pasta> <login>
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
@@ -157,14 +161,42 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
     local c; read -rp "Confirmar publicação? [s/N] " c </dev/tty || true
     [[ "$c" =~ ^[sySY] ]] || die "cancelado — nada publicado."
   fi
-  api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" | jq -r '"\(.id): público=\(.public)\(if .reqid then " (reqid \(.reqid))" else "" end)"'; }
+  api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" \
+    | jq -r 'if .public then "\(.id): PÚBLICO — o servidor VALIDA + CALIBRA (reqid \(.reqid // "?")). Acompanhe com: moj check \(.id)" else "\(.id): despublicado (saiu do treino livre)" end'; }
 cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
 cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
 cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
 
 cmd_status(){ need_login
-  if [[ $# -ge 1 ]]; then api GET "/problems/validation?id=$(enc "$1")" | jq -r 'if .status=="unvalidated" then "  ainda não validado" else "  validação: \(if .ok then "APROVADO" else "REPROVADO" end)\n" + ((.checks//[])|map("    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)")|join("\n")) end'
-  else api GET "/index/status" | jq -r '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; fi; }
+  if [[ $# -ge 1 ]]; then cmd_check "$1"; return; fi
+  api GET "/index/status" | jq -r '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; }
+# QA COMPLETO de um problema: validação (testado em todos os casos) + calibração (TL por juiz +
+# solução good que falhou em TODAS as máquinas) + TL servido/staleness.
+cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="$1" vt ct tt
+  vt="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null)" || vt='{}'
+  ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
+  tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
+  local validado calibrado recal miss
+  validado="$(jq -r 'if (.checks|not) or .status=="unvalidated" then "não validado" elif .ok then "APROVADO" else "REPROVADO" end' <<<"$vt" 2>/dev/null)"
+  calibrado="$(jq -r 'if .calibrated then "sim" else "não" end' <<<"$tt" 2>/dev/null)"
+  recal="$(jq -r 'if .needs_recalibration then "SIM ⚠" else "não" end' <<<"$tt" 2>/dev/null)"
+  miss="$(jq -rc '(.missing_langs // [])|join(", ")' <<<"$ct" 2>/dev/null)"
+  printf '%s\n  validado: %s   calibrado: %s   precisa recalibrar: %s\n' "$id" "${validado:-?}" "${calibrado:-?}" "${recal:-?}"
+  [[ -n "$miss" ]] && printf '  ⚠ REVISAR: solução good SEM TL em [%s] — falhou em TODAS as máquinas de juiz\n' "$miss"
+  echo "  Validação (testado em todos os casos):"
+  jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
+  echo "  Time limits (máx entre juízes):"
+  jq -r '(.time_limits//{})|to_entries|map(select(.key!="default"))| if length==0 then "    (sem TL)" else (map("    \(.key): \(.value)s")|join("\n")) end' <<<"$tt" 2>/dev/null
+  echo "  Calibração por máquina:"
+  jq -r '(.hosts//[])[] | "    \(.host): " + ((.tl//{})|to_entries|map(select(.key!="default"))|map("\(.key)=\(.value)")|join(" ")) + (if ((.missing//[])|length)>0 then "   (falta: \(.missing|join(","))" + ")" else "" end)' <<<"$ct" 2>/dev/null || echo "    (não calibrado)"
+}
+# PAINEL dos meus problemas: o que precisa de atenção, de relance (GET /problems/status).
+cmd_board(){ need_login; local j; j="$(api GET "/problems/status")"
+  jq -r '.counts as $c | "  \(.total) problemas · \($c.needs_review // 0) revisar · \($c.good_sol_no_tl // 0) good sem TL · \($c.public_unvalidated // 0) público não validado · \($c.needs_recalibration // 0) recalibrar"' <<<"$j"
+  { printf 'PROBLEMA\tPÚBLICO\tVALIDADO\tCALIBRADO\tREVISAR\n'
+    jq -r '(.problems//[]) | sort_by(if .needs_review then 0 elif .needs_recalibration then 1 else 2 end) | .[] | "\(.id)\t\(if .public then "sim" else "não" end)\t\(if .validated=="ok" then "OK" elif .validated=="error" then "REPROV" else "—" end)\t\(if .calibrated then "sim" else "não" end)\t\((.review_reasons//[])|join(","))"' <<<"$j"
+  } | { column -t -s$'\t' 2>/dev/null || cat; }
+}
 cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
   local id="$1" d="${1##*#}"
   # cache: se há um CLONE LOCAL, mostra os metadados/contagens dele — sem consultar o servidor.
@@ -383,7 +415,7 @@ case "$cmd" in
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
-  publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";;
+  publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;

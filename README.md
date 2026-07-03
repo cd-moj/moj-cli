@@ -53,8 +53,9 @@ bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
 | `moj test [dir]` · `moj push [dir] [--force]` | pré-voo local · envia (cria/edita) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
 | `moj download <id> [arq]` · `moj upload <id> <arq>` | baixa/sobe o pacote `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
-| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar/calibrar |
-| `moj status [<id>]` | status do sistema (juízes/fila) ou a validação de um problema |
+| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**) / calibrar |
+| `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
+| `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj mkdir <pasta>` · `moj share <pasta> <login>` / `unshare …` | pastas e compartilhamento |
 | `moj collection ls` | coleções (setters, admins, quais você gerencia) |
 | `moj collection create <nome> [--members a,b] [--admins c,d]` | cria coleção (competição/curso) |
@@ -97,8 +98,9 @@ compartilhar problemas existentes funciona para quem é dono/colaborador.
 ## Portão de qualidade
 
 `moj push` faz pré-voo local (**título**, enunciado, ≥1 exemplo, solução `good`). O portão
-**autoritativo** roda no servidor em `moj publish` (1 juiz valida HTML+exemplos+`good` aceita). Só
-então entra no treino livre; rascunho quebrado fica privado (`--force`).
+**autoritativo** roda no servidor: `moj publish` (= `moj public <id> on`) faz o servidor **validar**
+(HTML+exemplos+`good` aceita) **E calibrar** (um juiz roda as `good` e reporta o TL). Só entra no
+treino livre se o portão passar. Acompanhe com `moj check <id>` (valida/calibra por juiz, TL, `good` sem TL).
 
 **Título obrigatório:** `moj push` recusa enviar sem um título (o `.title` do `.moj-id` vazio ou o
 placeholder do `moj new`) — senão o problema fica com o **nome da pasta**. `moj upload` idem: exige
