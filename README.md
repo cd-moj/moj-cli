@@ -56,7 +56,9 @@ bruta; `9) Coleções` cria/escolhe coleções e gerencia setters/co-admins.
 | `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**) / calibrar |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
-| `moj mkdir <pasta>` · `moj share <pasta> <login>` / `unshare …` | pastas e compartilhamento |
+| `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
+| `moj org list\|create\|members\|public` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda) |
+| `moj mv <id> <org>` | move um **rascunho** p/ outra org (muda o id `<org>#<prob>`; bloqueia se público/em uso) |
 | `moj collection ls` | coleções (setters, admins, quais você gerencia) |
 | `moj collection create <nome> [--members a,b] [--admins c,d]` | cria coleção (competição/curso) |
 | `moj collection members <nome> [--add] [--remove] [--admins-add] [--admins-remove]` | gerencia o grupo |

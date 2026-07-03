@@ -15,6 +15,8 @@
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id>
 #   moj share <pasta> <login>     moj unshare <pasta> <login>
+#   moj org list|create|members|public   (orgs: quem edita + trava de público; privada por padrão)
+#   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
 #                  | members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]
@@ -150,7 +152,7 @@ cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"logi
   local c; c="$(http_code GET "/treino/contest-create/permission")"; [[ "$c" == 200 ]] && api GET "/treino/contest-create/permission" | jq -r '"pode criar problemas: \(if .can_create then "sim" else "não" end)\(if .reason then " (\(.reason))" else "" end)"'; }
 cmd_repos(){ need_login; api_get_cached 60 "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
 cmd_ls(){ need_login; local tab="${1:-mine}"; api_get_cached 60 "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
-cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <pasta>"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"pasta criada: \(.repo) (dono \(.owner))"'; }
+cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <org>   (= moj org create; a org é o <org> do id)"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"org criada: \(.repo) (você é admin)"'; }
 cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id> [--yes]   (= moj public <id> on)"; cmd_public "$1" on "${@:2}"; }
 cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--yes]"
   local id="$1" onoff="$2" yes=0 a; shift 2; for a in "$@"; do [[ "$a" == --yes || "$a" == -y ]] && yes=1; done
@@ -166,6 +168,31 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
 cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
 cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
 cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <pasta> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"colaboradores de \(.repo): \(.collaborators|join(", "))"'; }
+# gestão de ORGS (o <org> do id <org>#<prob>): membros escrevem em qualquer problema; admins gerem a
+# trava de público (privada = problemas nunca ficam públicos). Cada usuário tem a org implícita <login>.
+cmd_org(){ need_login; local sub="${1:-list}"; shift || true
+  case "$sub" in
+    list|ls) api GET "/orgs/list" | jq -r '.orgs[]? | "  \(.name)\t\(if .implicit then "(própria)" elif .public_allowed then "público-ok" else "privada" end)\t\(.count) probs (\(.public) púb)\t[\(.members|join(","))]\(if .can_manage then "  *admin" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; } ;;
+    create|new) [[ $# -ge 1 ]] || die "uso: moj org create <nome> [--public] [--members a,b] [--admins c]"
+      local name="$1" pa=false members="" admins=""; shift
+      while [[ $# -gt 0 ]]; do case "$1" in --public) pa=true;; --members) members="$2"; shift;; --admins) admins="$2"; shift;; esac; shift; done
+      api POST "/orgs/create" "$(jq -n --arg n "$name" --argjson pa "$pa" --arg m "$members" --arg a "$admins" '{name:$n, public_allowed:$pa, members:($m|split(",")|map(select(length>0))), admins:($a|split(",")|map(select(length>0)))}')" \
+        | jq -r '"org \(.name): membros=[\(.members|join(","))] admins=[\(.admins|join(","))] permite-público=\(.public_allowed)"' ;;
+    members|membros) [[ $# -ge 1 ]] || die "uso: moj org members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]"
+      local name="$1"; shift
+      if [[ $# -eq 0 ]]; then api GET "/orgs/members?name=$(enc "$name")" | jq -r '"membros: \(.members|join(", "))\nadmins:  \(.admins|join(", "))"'; return; fi
+      local add="" rem="" aadd="" arem=""
+      while [[ $# -gt 0 ]]; do case "$1" in --add) add="$2"; shift;; --remove) rem="$2"; shift;; --admins-add) aadd="$2"; shift;; --admins-remove) arem="$2"; shift;; esac; shift; done
+      api POST "/orgs/members" "$(jq -n --arg n "$name" --arg a "$add" --arg r "$rem" --arg aa "$aadd" --arg ar "$arem" '{name:$n, add:($a|split(",")|map(select(length>0))), remove:($r|split(",")|map(select(length>0))), admins_add:($aa|split(",")|map(select(length>0))), admins_remove:($ar|split(",")|map(select(length>0)))}')" \
+        | jq -r '"membros: \(.members|join(", "))\nadmins:  \(.admins|join(", "))"' ;;
+    public|publico) [[ $# -ge 2 ]] || die "uso: moj org public <nome> on|off"
+      local name="$1" onoff="$2" v=false; [[ "$onoff" == on ]] && v=true
+      api POST "/orgs/set-public-allowed" "$(jq -n --arg n "$name" --argjson v "$v" '{name:$n, public_allowed:$v}')" \
+        | jq -r '"org \(.name): permite público = \(.public_allowed)\(if (.unpublished//0)>0 then " (despublicou \(.unpublished))" else "" end)"' ;;
+    *) die "uso: moj org list|create|members|public" ;;
+  esac; }
+cmd_mv(){ need_login; [[ $# -ge 2 ]] || die "uso: moj mv <id> <org-destino>   (só rascunho; muda o id p/ <org>#<prob>)"
+  api POST "/problems/move" "$(jq -n --arg id "$1" --arg to "$2" '{id:$id, to_org:$to}')" | jq -r '"movido: \(.from) -> \(.id)"'; }
 
 cmd_status(){ need_login
   if [[ $# -ge 1 ]]; then cmd_check "$1"; return; fi
@@ -417,6 +444,7 @@ case "$cmd" in
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
+  org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
   help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

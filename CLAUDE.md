@@ -10,7 +10,8 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   problemas + o que revisar), `new`, `test`, `preview`, `download/upload`, `public`, `publish`
   (público => o servidor **valida + calibra**, via `set-public`), `calibrate`, `status [<id>]` /
   `check <id>` (QA: validação + TL por juiz + solução good sem TL / falhou em todas as máquinas),
-  `share`, `collection`.
+  `share`, `collection`, `org` (list/create/members/public — a org é o `<org>` do id; membros
+  escrevem, admins mexem na trava de público), `mv <id> <org>` (move rascunho, muda o id).
 - Config por ambiente: `MOJ_URL` (default `https://moj.naquadah.com.br`), `MOJ_HOST` (header
   `Host` p/ teste local), `EDITOR`.
 - É um **cliente** da API — não tem lógica de julgamento própria. O formato de pacote é o do
