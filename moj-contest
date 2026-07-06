@@ -17,7 +17,7 @@
 #   moj-contest -c <cid> settings [get]        moj-contest -c <cid> settings set k=v [k=v…]
 #     (penalidade ICPC: settings set penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce;
 #      penalty_verdicts= [vazio] = nenhum verdict penaliza)
-#   moj-contest -c <cid> extend <+min|epoch>
+#   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
 #                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
@@ -184,16 +184,35 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
       api POST "/contest/admin/settings$(qc)" "$body" | out '"salvo: \(.changed|join(", "))"';;
     *) die "settings: use 'get' ou 'set k=v …'";;
   esac; }
-cmd_extend(){ need_contest; need_login; [[ $# -ge 1 ]] || die "uso: extend <+min|epoch>"
-  local v="$1" end mins
+cmd_extend(){ need_contest; need_login
+  # extend <+min|epoch> [--group <regex> [--reason <txt>]]
+  # Sem --group: muda o fim GLOBAL (settings). Com --group: PRORROGA só os logins que casam
+  # com o regex (acrescenta regra em /contest/admin/time-overrides — ex.: queda de energia
+  # numa sede). A regra só ESTENDE (nunca encurta) e a penalidade segue do início normal.
+  local v="" group="" reason="" end mins
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --group)  group="${2:?--group precisa de regex}"; shift 2;;
+    --reason) reason="${2:-}"; shift 2;;
+    *) v="$1"; shift;;
+  esac; done
+  [[ -n "$v" ]] || die "uso: extend <+min|epoch> [--group <regex> [--reason <txt>]]"
   if [[ "$v" =~ ^\+([0-9]+)$ ]]; then
     mins="${BASH_REMATCH[1]}"   # capturar ANTES do api(): o =~ interno dele reseta BASH_REMATCH
     end="$(api GET "/contest/admin/settings$(qc)" | jq -r '.end // 0')"
     [[ "$end" =~ ^[0-9]+$ && "$end" -gt 0 ]] || die "fim atual desconhecido"
     end=$(( end + mins * 60 ))
   elif [[ "$v" =~ ^[0-9]+$ ]]; then end="$v"
-  else die "uso: extend <+min|epoch>"; fi
-  api POST "/contest/admin/settings$(qc)" "$(jq -cn --argjson e "$end" '{end:$e}')" | out '"novo fim: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"'"'; }
+  else die "uso: extend <+min|epoch> [--group <regex> [--reason <txt>]]"; fi
+  if [[ -n "$group" ]]; then
+    local rules
+    rules="$(api GET "/contest/admin/time-overrides$(qc)" | jq -c '.rules // []')"
+    rules="$(jq -c --arg r "$group" --argjson e "$end" --arg m "$reason" \
+      '. + [{regex:$r, end:$e, reason:$m}]' <<<"$rules")"
+    api POST "/contest/admin/time-overrides$(qc)" "$(jq -cn --argjson r "$rules" '{rules:$r}')" \
+      | out '"prorrogado p/ /'"$group"'/: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"' (\(.rules|length) regra(s))"'
+  else
+    api POST "/contest/admin/settings$(qc)" "$(jq -cn --argjson e "$end" '{end:$e}')" | out '"novo fim: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"'"'
+  fi; }
 cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
     ls) api GET "/contest/admin/problems$(qc)" | out '.problems[]? | "\(.letter)\t\(.name)\t\(.problem_id)\t\(if (.languages//[])|length>0 then .languages|join(",") else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
