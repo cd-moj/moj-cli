@@ -113,8 +113,8 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `list` · `show <cid>` | seus contests · resumo de um |
 | `export <cid> [arq] [--full]` · `duplicate <cid> [--id --name --start --end]` | spec p/ arquivo (sem credenciais) · cópia (sem usuários) |
 | `template list\|show\|save <nome> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | templates nomeados no servidor |
-| `settings get` · `settings set k=v …` · `extend <+min\|epoch>` | configurações do contest (penalidade ICPC: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce` — vírgulas; vazio = nenhum penaliza) |
-| `problems ls\|add <id>\|rm <letra>\|rename\|reorder\|langs <letra> <l1,l2\|->` | problemas do contest |
+| `settings get` · `settings set k=v …` · `extend <+min\|epoch>` | configurações do contest (penalidade ICPC: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce` — vírgulas; vazio = nenhum penaliza; pool de juízes: `judges=cpu1,cpu2` — vazio = qualquer juiz online) |
+| `problems ls\|add <id>\|rm <letra>\|rename\|reorder\|langs <letra> <l1,l2\|->\|judges <letra> <h1,h2\|->` | problemas do contest (`langs -`/`judges -` = volta a herdar do contest) |
 | `problems search <q> [--collection C]` · `problems draw [--collections "A,B"] [--tags a,b] [--count N] [--difficulty d] [--seed s] [--add]` | banco público: busca e **sorteio por coleção/tag/dificuldade** (`--add` já adiciona) |
 | `users ls\|add\|reset\|rm\|disable\|logout <login>\|set-password-all <senha>` | usuários (troca geral pede confirmação) |
 | `sessions` · `dashboard` · `score` · `audit [n]` · `access [dia]` · `news ls\|add\|rm` | operação da prova |
