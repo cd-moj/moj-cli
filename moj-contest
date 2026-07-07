@@ -24,7 +24,7 @@
 #                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
 #   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
 #                       | rm <login> | disable <login> | logout <login> | set-password-all <senha> [--include-disabled]
-#   moj-contest -c <cid> sessions | dashboard | score | audit [n] | access [AAAA-MM-DD]
+#   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest remove <cid>             (tira do ar; exige .admin do TREINO)
 # Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host p/ dev). Saída crua: --json.
@@ -290,6 +290,10 @@ cmd_sessions(){ need_contest; need_login
 cmd_dashboard(){ need_contest; need_login
   api GET "/contest/admin/dashboard$(qc)" | out '"juízes: \(.judges.online)/\(.judges.total) online, \(.judges.busy) ocupados, fila \(.judges.queue_depth)\nsubmissões: \(.submissions.total) (pendentes \(.submissions.pending), maior espera \(.submissions.max_wait_s)s)\nresposta: média \(.submissions.response.avg_s)s  p95 \(.submissions.response.p95_s)s"'; }
 cmd_score(){ need_contest; api GET "/contest/score$(qc)"; }
+cmd_report(){ need_contest; need_login   # relatório estático da prova (tar.gz navegável offline)
+  local outf="${1:-relatorio-$CONTEST.tar.gz}"
+  api_get_to_file "/contest/admin/report$(qc)" "$outf"
+  echo "relatório: $outf ($(wc -c <"$outf" | tr -d '[:space:]') bytes) — extraia e abra o index.html"; }
 cmd_audit(){ need_contest; need_login; local n="${1:-30}"
   api GET "/contest/admin/audit-log$(qc)&limit=$(enc "$n")" | out '.events[]? | "\(.time|todate)\t\(.kind)\t\(.who//"")\t\(.action//"")\t\(.details//"")"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_access(){ need_contest; need_login; local day="${1:-$(date +%F)}"
@@ -313,6 +317,7 @@ case "$cmd" in
   settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
   problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";;
   sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
+  report) cmd_report "$@";;
   audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
   help|-h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
