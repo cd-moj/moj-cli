@@ -163,6 +163,12 @@ com mensagem clara) e os utilitários BSD nativos (base64/stat/md5/readlink já 
 portável). O que NÃO roda no macOS é o julgamento local (`moj test --run`) — a jaula do juiz é
 Linux (bwrap/namespaces); use o fluxo remoto (`moj publish`/`calibrate`/`check`).
 
+## Privacidade do token
+
+O token de sessão **não aparece no `ps`**: os curls autenticam com `-H @~/.config/moj/hdr-<contest>`
+(arquivo 600 criado no login; sessões antigas ganham o arquivo na primeira chamada) — em máquina
+compartilhada (laboratório), outro usuário rodando `ps` vê só o caminho do arquivo, nunca o token.
+
 ## Saída crua (--json)
 
 `moj --json <ls|board|status|check> …` imprime a resposta da API sem formatação (scripts/pipelines);

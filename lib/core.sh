@@ -62,15 +62,26 @@ token_file(){ local c f; c="${1:-$CONTEST}"; f="$CFG/token-$c"
   [[ -f "$f" ]] && { printf '%s' "$f"; return; }
   [[ "$c" == treino && -f "$CFG/token" ]] && { printf '%s' "$CFG/token"; return; }
   printf '%s' "$f"; }
-# token_save [contest]  (token no stdin) — grava com umask 077
+# token_save [contest]  (token no stdin) — grava com umask 077 (+ o header-file do curl)
 token_save(){ local c="${1:-$CONTEST}"; mkdir -p "$CFG"; chmod 700 "$CFG" 2>/dev/null || true
-  ( umask 077; cat > "$CFG/token-$c" ); }
-token_drop(){ local c="${1:-$CONTEST}"; rm -f "$CFG/token-$c"; [[ "$c" == treino ]] && rm -f "$CFG/token"; return 0; }
+  ( umask 077; cat > "$CFG/token-$c"
+    printf 'Authorization: Bearer %s' "$(cat "$CFG/token-$c")" > "$CFG/hdr-$c" ); }
+token_drop(){ local c="${1:-$CONTEST}"; rm -f "$CFG/token-$c" "$CFG/hdr-$c"
+  [[ "$c" == treino ]] && rm -f "$CFG/token" "$CFG/hdr"; return 0; }
 need_login(){ [[ -f "$(token_file)" ]] || die "faça '$MOJ_TOOL login' primeiro."; }
+# auth_hdr_file [contest] -> header-file p/ `curl -H @arquivo`: o token NUNCA vai no argv
+# (o -H "…Bearer …" aparece no ps/cmdline p/ qualquer usuário — ruim em máquina de lab).
+# Migração preguiçosa: sessão antiga (só token-<c>) ganha o hdr na 1ª chamada.
+auth_hdr_file(){ local c tf h; c="${1:-$CONTEST}"; tf="$(token_file "$c")"; h="$CFG/hdr-$c"
+  [[ -f "$tf" ]] || return 1
+  if [[ ! -f "$h" || "$h" -ot "$tf" ]]; then
+    ( umask 077; printf 'Authorization: Bearer %s' "$(cat "$tf")" > "$h" ) 2>/dev/null || return 1
+  fi
+  printf '%s' "$h"; }
 
 api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die). Token resolvido POR CHAMADA.
-  local m="$1" p="$2" data="${3:-}" auth=() out code tmp tf; tmp="$(mktemp)"; tf="$(token_file)"
-  [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
+  local m="$1" p="$2" data="${3:-}" auth=() out code tmp hf; tmp="$(mktemp)"
+  hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   if [[ -n "$data" ]]; then code="$(printf '%s' "$data" | curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data-binary @- "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   else code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"; fi
   out="$(cat "$tmp")"; rm -f "$tmp"
@@ -87,20 +98,20 @@ api_get_cached(){ local ttl="$1" p="$2" cf age out
   out="$(api GET "$p")" || return 1
   ( umask 077; mkdir -p "$(dirname "$cf")" 2>/dev/null; printf '%s' "$out" > "$cf" ) 2>/dev/null
   printf '%s' "$out"; }
-http_code(){ local m="$1" p="$2" auth=() tf; tf="$(token_file)"
-  [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
+http_code(){ local m="$1" p="$2" auth=() hf
+  hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
 api_post_file(){ # api_post_file PATH BODYFILE -> POST grande (corpo via arquivo; evita ARG_MAX)
-  local p="$1" f="$2" auth=() out code tmp tf; tmp="$(mktemp)"; tf="$(token_file)"
-  [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
+  local p="$1" f="$2" auth=() out code tmp hf; tmp="$(mktemp)"
+  hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X POST -H 'Content-Type: application/json' --data-binary @"$f" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   out="$(cat "$tmp")"; rm -f "$tmp"
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
   die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
 }
 # download autenticado p/ arquivo: api_get_to_file PATH DESTFILE (falha -> die)
-api_get_to_file(){ local p="$1" dest="$2" auth=() code tf; tf="$(token_file)"
-  [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
+api_get_to_file(){ local p="$1" dest="$2" auth=() code hf
+  hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   code="$(curl -sS -o "$dest" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   [[ "$code" =~ ^2 ]] || { [[ -f "$dest" ]] && rm -f "$dest"; die "download falhou${code:+ ($code)}"; }
 }
