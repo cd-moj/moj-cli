@@ -20,6 +20,19 @@ Para a camada de **gestão de contest** (`moj contest …` / `moj-contest`), bai
 curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest
 ```
 
+Para a camada de **gerência de juízes** (`moj judges …` / `moj-judges`, só admin):
+
+```bash
+curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges
+```
+
+| `moj judges` | O que faz (sessão `.admin` do treino) |
+|---|---|
+| `ls` · `show <host>` | saúde dos juízes (slots ocupados/total, partição, cache, TLs) · detalhe + jobs correntes |
+| `config <host> [--partition off\|numa\|cpus:<X>] [--reserve N] [--disable\|--enable]` | **particiona a máquina em SLOTS** (corrige N problemas ao mesmo tempo, cada job pinado no seu conjunto de cpus); o agente drena e aplica |
+| `results [host] [-n N]` | relatório de correções por juiz (veredicto, tempo, quem/qual) |
+| `clearcache <host>` · `calibrate <id> [--hosts …]` · `queue` · `status` | operação do parque |
+
 (Os arquivos servidos são auto-contidos — gerados por `mkdist.sh` a partir de `lib/core.sh` +
 cada camada. Rodando do repo, os scripts sourceiam `lib/core.sh` direto.)
 

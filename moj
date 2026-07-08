@@ -533,6 +533,7 @@ while [[ "${1:-}" == --json ]]; do RAW=1; shift; done
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   contest) exec_layer contest "$@";;
+  judges) exec_layer judges "$@";;
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;

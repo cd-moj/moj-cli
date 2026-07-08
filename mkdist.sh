@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 [[ -f lib/core.sh ]] || { echo "mkdist: lib/core.sh não encontrada" >&2; exit 1; }
 mkdir -p dist
-for tool in moj moj-contest; do
+for tool in moj moj-contest moj-judges; do
   [[ -f "$tool" ]] || { echo "mkdist: pulando $tool (não existe)"; continue; }
   grep -q '^# @INLINE-BEGIN' "$tool" || { echo "mkdist: $tool sem marcador @INLINE-BEGIN" >&2; exit 1; }
   awk 'BEGIN{skip=0}

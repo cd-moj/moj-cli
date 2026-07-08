@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# moj-judges — CLI de GERÊNCIA FINA DOS JUÍZES do MOJ (camada 'judges'; `moj judges …` delega aqui).
+# Tudo pela API com sessão .admin do TREINO (`moj login`); o corte é no servidor.
+#
+#   moj-judges ls                        saúde: host, slots ocupados/total, partição, cache, TLs
+#   moj-judges show <host>               detalhe: specs, config, jobs correntes, calibrações na fila
+#   moj-judges config <host> [--partition off|numa|cpus:<X>] [--reserve N] [--disable|--enable]
+#       particiona a máquina em SLOTS (corrige N problemas ao mesmo tempo, cada job pinado
+#       no seu conjunto de cpus); sem flags, mostra a config vigente. O agente DRENA os jobs
+#       em andamento e aplica (acompanhe com 'ls').
+#   moj-judges results [host] [-n N]     últimas correções por juiz (veredicto, tempo, quem/qual)
+#   moj-judges clearcache <host>         limpa o cache do juiz (re-baixa e recalibra sob demanda)
+#   moj-judges calibrate <id> [--hosts h1,h2]   calibração (direcionada com --hosts)
+#   moj-judges queue                     fila de submissões + calibrações pendentes
+#   moj-judges status                    resumo público (juízes online, slots, fila, daemons)
+#
+# Config: MOJ_URL, MOJ_HOST (header Host p/ dev). Saída crua: --json (antes do subcomando).
+set -euo pipefail
+
+MOJ_TOOL=moj-judges
+# @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
+_moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
+[[ -f "$_MOJ_LIB" ]] || { printf 'moj-judges: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
+source "$_MOJ_LIB"
+# @INLINE-END
+
+# gerência de juízes é papel do .admin do TREINO — sessão do `moj login`
+CONTEST=treino
+while [[ "${1:-}" == --json ]]; do RAW=1; shift; done
+need_login(){ [[ -f "$(token_file treino)" ]] || die "faça 'moj login' (sessão .admin do treino) primeiro."; }
+
+cmd_ls(){ need_login
+  local j; j="$(api GET "/treino/admin/judges?contest=treino")"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+  jq -r '.machines[] |
+    (if .online then (if (.slots.free // 1) == 0 then "🟡" elif (.slots.free // 1) < (.slots.total // 1) then "🟡" else "🟢" end) else "🔴" end) as $st |
+    [ $st + " " + .host,
+      "\((.slots.total // 1) - (.slots.free // (.slots.total // 1)))/\(.slots.total // 1) slots",
+      (.partition // "off") + (if .config.disabled then " ⛔" else "" end)
+        + (if (.config.partition // (.partition // "off")) != (.partition // "off") then " →" + .config.partition else "" end),
+      "\(.cache.problems // 0)p·\((.cache.bytes // 0) / 1048576 | floor)MB",
+      "tl:\(.tl.calibrated // 0)",
+      (.report.cpu // "?" | .[0:34]),
+      "visto há \(now - (.last_seen // 0) | if . < 90 then "\(floor)s" elif . < 5400 then "\(./60|floor)m" else "\(./3600|floor)h" end)"
+    ] | @tsv' <<<"$j" | column -t -s$'\t' 2>/dev/null || cat; }
+
+cmd_show(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges show <host>"
+  local h="$1" j m
+  j="$(api GET "/treino/admin/judges?contest=treino")"
+  m="$(jq -c --arg h "$h" '.machines[] | select(.host == $h)' <<<"$j")"
+  [[ -n "$m" ]] || die "juiz desconhecido: $h (veja 'moj-judges ls')"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$m"; return; }
+  jq -r '
+    "host:      \(.host)  \(if .online then "🟢 online" else "🔴 offline" end)",
+    "slots:     \((.slots.total // 1) - (.slots.free // (.slots.total // 1))) ocupado(s) de \(.slots.total // 1)  (partition \(.partition // "off"))",
+    "config:    \(if .config then (.config | "partition \(.partition // "off")  reserve \(.reserve // 0)  \(if .disabled then "⛔ DESABILITADO" else "habilitado" end)  (por \(.by // "?"))") else "(default: off)" end)",
+    "cpu:       \(.report.cpu // "?")  (\(.report.arch // "?"))",
+    "memória:   \((.report.memory // 0) / 1048576 * 10 | floor / 10) GB",
+    "gpu:       \(.report.gpu.names // "—")",
+    "jaula:     \(if .cage_root then "rootfs \(.cage_root)" else "host" end)",
+    "topologia: \(.topology | if length > 0 then map("node\(.node)[\(.cpus)]") | join(" ") else "—" end)",
+    "langs:     \(.langs | join(" "))",
+    "cache:     \(.cache.problems // 0) problema(s) · \((.cache.bytes // 0) / 1048576 | floor) MB",
+    "tl:        \(.tl.calibrated // 0) problema(s) calibrado(s) [\(.tl.langs // [] | join(" "))]",
+    "fila:      \(.queued_calibrate // 0) calibração(ões) direcionada(s)",
+    "rodando:   \(.current_jobs // [] | if length == 0 then "nada" else map("\(.kind) \(.problem_id // "?")\(if .login and .login != "" then " (\(.login))" else "" end)") | join(" · ") end)"
+  ' <<<"$m"; }
+
+cmd_config(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges config <host> [--partition off|numa|cpus:<X>] [--reserve N] [--disable|--enable]"
+  local h="$1"; shift
+  local part="" res="" dis="" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      --partition) part="${1:?}"; shift;;
+      --reserve)   res="${1:?}"; shift;;
+      --disable)   dis=true;;
+      --enable)    dis=false;;
+      *) die "opção desconhecida: $a";;
+    esac
+  done
+  if [[ -z "$part$res$dis" ]]; then
+    api GET "/ops/judge-config?host=$(enc "$h")&contest=treino" | out '.configs | to_entries[] | "\(.key): partition \(.value.partition // "off")  reserve \(.value.reserve // 0)  \(if .value.disabled then "⛔ desabilitado" else "habilitado" end)"'
+    return
+  fi
+  [[ -z "$part" || "$part" =~ ^(off|numa|cpus:[1-9][0-9]*)$ ]] || die "partition inválida (off | numa | cpus:<X>)"
+  [[ -z "$res" || "$res" =~ ^[0-9]+$ ]] || die "reserve inválido (int >= 0)"
+  local body; body="$(jq -cn --arg h "$h" --arg p "$part" --arg r "$res" --arg d "$dis" \
+    '{host:$h} + (if $p != "" then {partition:$p} else {} end)
+              + (if $r != "" then {reserve:($r|tonumber)} else {} end)
+              + (if $d != "" then {disabled:($d == "true")} else {} end)')"
+  api POST "/ops/judge-config?contest=treino" "$body" \
+    | out '"config de \(.host): partition \(.config.partition)  reserve \(.config.reserve)  \(if .config.disabled then "⛔ desabilitado" else "habilitado" end)\n(o agente drena os jobs em andamento e aplica — acompanhe com moj-judges ls)"'; }
+
+cmd_results(){ need_login
+  local h="" n=20 a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in -n) n="${1:?}"; shift;; --*) die "opção desconhecida: $a";; *) h="$a";; esac
+  done
+  local j; j="$(api GET "/ops/judge-results?host=$(enc "$h")&limit=$n&contest=treino")"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+  jq -r '.by_host | to_entries[] |
+    "  \(.key): \(.value.total) correções · \(.value.accepted) aceitas · \(.value.judge_errors) judge-error · média \(.value.avg_duration)s"' <<<"$j"
+  echo "  ---"
+  jq -r '.results[] | [ (.finalized_at // 0 | strftime("%m-%d %H:%M")), .host, .verdict, .problem_id, .login, .lang, "\(.duration_s // "?")s" ] | @tsv' <<<"$j" \
+    | column -t -s$'\t' 2>/dev/null || cat; }
+
+cmd_clearcache(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges clearcache <host>"
+  api POST "/ops/judge-cache?contest=treino" "$(jq -cn --arg h "$1" '{host:$h, action:"clearcache"}')" \
+    | out '"cache de \(.host): limpeza enfileirada (o juiz executa após drenar os jobs; re-baixa e recalibra sob demanda)"'; }
+
+cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges calibrate <id> [--hosts h1,h2]"
+  local id="$1"; shift; local hosts="[]" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in --hosts) hosts="$(jq -cn --arg h "${1:?}" '$h | split(",")')"; shift;; *) die "opção desconhecida: $a";; esac
+  done
+  api POST "/problems/request-calibration?contest=treino" "$(jq -cn --arg id "$id" --argjson h "$hosts" '{id:$id} + (if ($h|length) > 0 then {hosts:$h} else {} end)')" \
+    | out '"calibração de \(.id): \(.status)\(if .hosts then " -> \(.hosts | if type == "array" then map(if type == "object" then .host else . end) | join(",") else tostring end)" else " (1 juiz livre pega)" end)"'; }
+
+cmd_queue(){ need_login
+  api GET "/treino/admin/queue?contest=treino" | out '"  fila: \(.total_pending) submissão(ões) pendente(s) (\(.spool_queued) no spool)\n  calibrações: \(.calib_pending) pendente(s) · \(.calib_inflight) em execução · \(.calib_targeted) direcionada(s)"'; }
+
+cmd_status(){
+  api GET "/index/status" | out '"  juízes: \(.judge.online)/\(.judge.total) online · \(.judge.busy)/\(.judge.slots // .judge.online) slot(s) ocupado(s) · \(.judge.cpus_online) CPUs · \(.judge.gpus_online) GPU\n  fila: \(.queue.total_pending) pendente(s)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)"'; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  ls|list) cmd_ls "$@";;
+  show) cmd_show "$@";;
+  config) cmd_config "$@";;
+  results|report) cmd_results "$@";;
+  clearcache) cmd_clearcache "$@";;
+  calibrate) cmd_calibrate "$@";;
+  queue) cmd_queue "$@";;
+  status) cmd_status "$@";;
+  help|-h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//';;
+  *) die "comando desconhecido: $cmd (veja 'moj-judges help')";;
+esac

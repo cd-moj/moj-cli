@@ -21,11 +21,13 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   `display_title`), **não** o `% Título` do texto (legado); por isso `push`/`upload` exigem título.
 - **Mexeu no formato do pacote?** A descrição em `README.md` ("Pacote do problema") tem de bater com
   `cdmoj/docs/API.md` + `cdmoj/CLAUDE.md` + `mojtools/CLAUDE.md` — atualize as quatro no mesmo commit.
-- **Camadas**: `moj` (autoria de problemas) + `moj-contest` (gestão de contest) compartilham o
-  núcleo SOURCED `lib/core.sh` (config/env, `api()`/cache/`http_code`/`api_post_file`, e o
-  **token POR CONTEST** em `~/.config/moj/token-<contest>`, com fallback legado `token` p/ o
-  treino). `moj <camada> …` delega ao executável `moj-<camada>` (ao lado do script ou no PATH) —
-  padrão p/ camadas futuras. `bash -euo pipefail` em todos; `bash -n` antes de commitar.
+- **Camadas**: `moj` (autoria de problemas) + `moj-contest` (gestão de contest) + `moj-judges`
+  (gerência fina dos juízes: slots/particionamento, config por juiz, relatório de correções —
+  sessão `.admin` do treino) compartilham o núcleo SOURCED `lib/core.sh` (config/env,
+  `api()`/cache/`http_code`/`api_post_file`, e o **token POR CONTEST** em
+  `~/.config/moj/token-<contest>`, com fallback legado `token` p/ o treino). `moj <camada> …`
+  delega ao executável `moj-<camada>` (ao lado do script ou no PATH) — padrão p/ camadas
+  futuras. `bash -euo pipefail` em todos; `bash -n` antes de commitar.
 - **Distribuição continua de 1 arquivo**: `bash mkdist.sh` embute a lib nos artefatos
   `dist/{moj,moj-contest}` (marcadores `# @INLINE-BEGIN/END`); são ELES que o cdmoj serve em
   `web/moj`/`web/moj-contest` (ver `cdmoj/docs/DEPLOY.md`). Nunca copie o script do repo direto.
