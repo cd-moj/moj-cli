@@ -34,14 +34,14 @@ set -euo pipefail
 
 MOJ_TOOL=moj-contest
 # @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
-_MOJ_LIB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/core.sh"
+_moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
 [[ -f "$_MOJ_LIB" ]] || { printf 'moj-contest: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
 source "$_MOJ_LIB"
 # @INLINE-END
 
 CONTEST_SET=0; [[ -n "${MOJ_CONTEST:-}" ]] && CONTEST_SET=1
-RAW=0
-# flags globais (antes do subcomando): -c <cid> | --json
+# flags globais (antes do subcomando): -c <cid> | --json (RAW/out vêm da lib)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -c|--contest) [[ $# -ge 2 ]] || die "uso: -c <contest>"; CONTEST="$2"; CONTEST_SET=1; shift 2;;
@@ -55,7 +55,6 @@ qc(){ printf '?contest=%s' "$(enc "$CONTEST")"; }
 # api_t — chama a API com a sessão do TREINO (criação/templates/export/…), qualquer que seja -c
 api_t(){ local _old="$CONTEST"; CONTEST=treino; api "$@"; local rc=$?; CONTEST="$_old"; return $rc; }
 need_login_t(){ [[ -f "$(token_file treino)" ]] || die "faça 'moj login' (sessão do treino) primeiro."; }
-out(){ if [[ "$RAW" == 1 ]]; then cat; else jq -r "$1"; fi; }   # out <filtro-legível>  (stdin=json)
 
 # ---- sessão -------------------------------------------------------------------------------
 cmd_login(){ local cid="${1:-}" u=""
@@ -211,9 +210,9 @@ cmd_extend(){ need_contest; need_login
     rules="$(jq -c --arg r "$group" --argjson e "$end" --arg m "$reason" \
       '. + [{regex:$r, end:$e, reason:$m}]' <<<"$rules")"
     api POST "/contest/admin/time-overrides$(qc)" "$(jq -cn --argjson r "$rules" '{rules:$r}')" \
-      | out '"prorrogado p/ /'"$group"'/: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"' (\(.rules|length) regra(s))"'
+      | out '"prorrogado p/ /'"$group"'/: '"$(_fmt_epoch "$end")"' (\(.rules|length) regra(s))"'
   else
-    api POST "/contest/admin/settings$(qc)" "$(jq -cn --argjson e "$end" '{end:$e}')" | out '"novo fim: '"$(date -d "@$end" '+%d/%m %H:%M' 2>/dev/null || echo "$end")"'"'
+    api POST "/contest/admin/settings$(qc)" "$(jq -cn --argjson e "$end" '{end:$e}')" | out '"novo fim: '"$(_fmt_epoch "$end")"'"'
   fi; }
 cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in

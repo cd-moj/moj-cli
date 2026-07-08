@@ -12,10 +12,13 @@
 #   moj status [<id>] | check <id>  (sem id: saúde do sistema; com id: QA do problema —
 #                                    validação, time-limits por juiz, solução good sem TL)
 #   moj new <org> <prob>          moj clone <id> [dir]            moj info <id>
-#   moj edit <id|dir>             moj test [dir]                  moj push [dir] [--force]
-#   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> <arquivo>
+#   moj edit <id|dir>             moj push [dir] [--force]        (push/clone levam scripts/ e tests/score)
+#   moj test [dir] [--run [sol]]  (--run JULGA local via mojtools; exige Linux+bwrap real)
+#   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
+#   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
+#   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> [dir|arquivo] [--force]
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
-#   moj calibrate <id>
+#   moj calibrate <id>            (--json antes do subcomando = saída crua em ls/board/status/check)
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
 #   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
 #   moj collection ls|create|show|add|remove|rename|delete  (coleções = tags de agrupamento, m:n)
@@ -30,7 +33,11 @@ set -euo pipefail
 
 MOJ_TOOL=moj
 # @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
-_MOJ_LIB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/core.sh"
+# resolução portável do caminho (readlink -f é GNU; macOS/BSD não tem — a lib traz _abspath,
+# mas aqui ela ainda não foi sourceada): tenta -f, cai p/ dirname+pwd (bom o suficiente p/
+# achar a lib ao lado do script; symlink multi-nível exige GNU ou o artefato dist).
+_moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
 [[ -f "$_MOJ_LIB" ]] || { printf 'moj: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
 source "$_MOJ_LIB"
 # @INLINE-END
@@ -58,6 +65,20 @@ _cat(){ local d="$1" c="$2" of="$3" f
   for f in "$d/sols/$c"/*; do [[ -f "$f" ]] || continue
     jq -nc --arg fn "$(basename "$f")" --rawfile code "$f" '{filename:$fn,code:$code}' >> "$of"
   done; shopt -u nullglob; }
+# _scripts_nd <dir> <outfile> — NDJSON de scripts/ (round-trip da correção especial):
+# arquivo = {path,content_b64,exec} (base64 suporta binário); symlink = {path,symlink}
+# (os drivers interativos usam scripts/<lang> -> c). Conteúdo via arquivo, nunca argv.
+_scripts_nd(){ local d="$1" of="$2" f rel x tb
+  : > "$of"; [[ -d "$d/scripts" ]] || return 0
+  tb="$(mktemp)"
+  while IFS= read -r f; do
+    rel="${f#"$d"/scripts/}"
+    if [[ -L "$f" ]]; then jq -nc --arg p "$rel" --arg t "$(readlink "$f")" '{path:$p,symlink:$t}' >> "$of"
+    elif [[ -f "$f" ]]; then _b64enc "$f" > "$tb"; x=false; [[ -x "$f" ]] && x=true
+      jq -nc --arg p "$rel" --argjson x "$x" --rawfile c "$tb" '{path:$p,content_b64:$c,exec:$x}' >> "$of"
+    fi
+  done < <(find "$d/scripts" \( -type f -o -type l \) 2>/dev/null | LC_ALL=C sort)
+  rm -f "$tb"; }
 enun_path(){ local e; for e in md org tex; do [[ -f "$1/docs/enunciado.$e" ]] && { printf '%s' "$1/docs/enunciado.$e"; return; }; done; printf '%s' "$1/docs/enunciado.md"; }
 pkg_to_json(){ local d="$1" enunf="" efmt=md
   local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; case "$ef" in *.org) efmt=org;; *.tex) efmt=tex;; *) efmt=md;; esac; break; }; done
@@ -67,19 +88,27 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   local t; t="$(mktemp -d)"
   _pairs "$d" sample "$t/exs"; _pairs "$d" hidden "$t/tss"
   _cat "$d" good "$t/good"; _cat "$d" slow "$t/slow"; _cat "$d" wrong "$t/wrong"; _cat "$d" pass "$t/pass"; _cat "$d" upcoming "$t/up"
+  _scripts_nd "$d" "$t/scr"
   local enf="${enunf:-/dev/null}"; [[ -f "$enf" ]] || enf=/dev/null
   local edf="$d/docs/solucao.md"; [[ -f "$edf" ]] || edf=/dev/null
+  local scoref="$d/tests/score"; [[ -f "$scoref" ]] || scoref=/dev/null   # ""=remove no servidor (fidelidade)
+  # round-trip de scripts/score só quando o clone é CIENTE (scripts_rt no .moj-id) ou o
+  # diretório/arquivo existe localmente — clone antigo não apaga scripts/score de ninguém.
+  local rtflag=n
+  { [[ -d "$d/scripts" || -f "$d/tests/score" ]] || [[ "$(jq -r '.scripts_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && rtflag=y
   jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
-        --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" \
+        --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" --slurpfile scr "$t/scr" \
         --slurpfile good "$t/good" --slurpfile slow "$t/slow" --slurpfile wrong "$t/wrong" \
-        --slurpfile pass "$t/pass" --slurpfile up "$t/up" \
-        --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --rawfile editorial "$edf" '
+        --slurpfile pass "$t/pass" --slurpfile up "$t/up" --rawfile scoretxt "$scoref" \
+        --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --rawfile editorial "$edf" \
+        --arg rtflag "$rtflag" '
     {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
+    + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
   rm -rf "$t"; }
 json_to_pkg(){ local j="$1" d="$2" id="$3"
@@ -98,8 +127,27 @@ json_to_pkg(){ local j="$1" d="$2" id="$3"
   if [[ "$(jq -r 'map(select(.!=""))|length' <<<"$notes" 2>/dev/null)" -gt 0 ]]; then printf '%s' "$notes" > "$d/docs/sample-notes.json"; else rm -f "$d/docs/sample-notes.json"; fi
   # resolução/editorial (só setter; não vai p/ o aluno) -> docs/solucao.md
   local ed; ed="$(jq -r '.editorial_md // ""' <<<"$j")"; if [[ -n "$ed" ]]; then printf '%s' "$ed" > "$d/docs/solucao.md"; else rm -f "$d/docs/solucao.md"; fi
+  # scripts/ (correção especial) — round-trip: arquivos (base64, +x) e symlinks
+  rm -rf "$d/scripts"
+  local sc sp st
+  while IFS= read -r sc; do
+    sp="$(jq -r '.path//empty' <<<"$sc")"; [[ -n "$sp" ]] || continue
+    case "$sp" in /*|*..*) continue;; esac
+    mkdir -p "$d/scripts/$(dirname "$sp")"
+    st="$(jq -r '.symlink//empty' <<<"$sc")"
+    if [[ -n "$st" ]]; then ln -sfn "$st" "$d/scripts/$sp"
+    else jq -r '.content_b64//""' <<<"$sc" | _b64dec > "$d/scripts/$sp" 2>/dev/null || : > "$d/scripts/$sp"
+      [[ "$(jq -r '.exec//false' <<<"$sc")" == true ]] && chmod +x "$d/scripts/$sp"
+    fi
+  done < <(jq -c '(.scripts_files//[])[]' <<<"$j")
+  # tests/score cru (subtarefas) — round-trip (o $() come o \n final; repõe exatamente 1,
+  # como o _putfile do servidor)
+  local sct; sct="$(jq -r '.score_text // ""' <<<"$j")"
+  if [[ -n "$sct" ]]; then printf '%s\n' "$sct" > "$d/tests/score"; else rm -f "$d/tests/score"; fi
+  # scripts_rt: marca o clone como "ciente do round-trip" — só ele pode APAGAR scripts/score
+  # no servidor via push (clone antigo sem scripts materializados não destrói nada).
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --argjson s "$j" \
-    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), public:($s.public//false)}' > "$d/.moj-id"; }
+    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), public:($s.public//false), scripts_rt:true}' > "$d/.moj-id"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
 conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
@@ -115,7 +163,9 @@ cmd_logout(){ token_drop; echo "deslogado."; }
 cmd_whoami(){ need_login; api GET "/auth/status?contest=$CONTEST" | jq -r '"login: \(.login//"?")  nome: \(.name//"?")"'
   local c; c="$(http_code GET "/treino/contest-create/permission")"; [[ "$c" == 200 ]] && api GET "/treino/contest-create/permission" | jq -r '"pode criar problemas: \(if .can_create then "sim" else "não" end)\(if .reason then " (\(.reason))" else "" end)"'; }
 cmd_repos(){ need_login; api_get_cached 60 "/problems/repos" | jq -r '.repos[]? | "  \(.repo)\(if .mine then "" else "  (compartilhado)" end)  [\(.collaborators|join(","))]"'; }
-cmd_ls(){ need_login; local tab="${1:-mine}"; api_get_cached 60 "/problems/$tab" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_ls(){ need_login; local tab="${1:-mine}" j; j="$(api_get_cached 60 "/problems/$tab")"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+  jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' <<<"$j" | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <org>   (= moj org create; a org é o <org> do id)"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"org criada: \(.repo) (você é admin)"'; }
 cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id> [--yes]   (= moj public <id> on)"; cmd_public "$1" on "${@:2}"; }
 cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--yes]"
@@ -162,13 +212,14 @@ cmd_mv(){ need_login; [[ $# -ge 2 ]] || die "uso: moj mv <id> <org-destino>   (s
 
 cmd_status(){ need_login
   if [[ $# -ge 1 ]]; then cmd_check "$1"; return; fi
-  api GET "/index/status" | jq -r '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; }
+  api GET "/index/status" | out '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; }
 # QA COMPLETO de um problema: validação (testado em todos os casos) + calibração (TL por juiz +
 # solução good que falhou em TODAS as máquinas) + TL servido/staleness.
 cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="$1" vt ct tt
   vt="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null)" || vt='{}'
   ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
   tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
+  [[ "$RAW" == 1 ]] && { jq -cn --argjson v "$vt" --argjson c "$ct" --argjson t "$tt" '{validation:$v, calib:$c, tl:$t}'; return; }
   local validado calibrado recal miss
   validado="$(jq -r 'if (.checks|not) or .status=="unvalidated" then "não validado" elif .ok then "APROVADO" else "REPROVADO" end' <<<"$vt" 2>/dev/null)"
   calibrado="$(jq -r 'if .calibrated then "sim" else "não" end' <<<"$tt" 2>/dev/null)"
@@ -185,6 +236,7 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
 }
 # PAINEL dos meus problemas: o que precisa de atenção, de relance (GET /problems/status).
 cmd_board(){ need_login; local j; j="$(api GET "/problems/status")"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
   jq -r '.counts as $c | "  \(.total) problemas · \($c.needs_review // 0) revisar · \($c.good_sol_no_tl // 0) good sem TL · \($c.public_unvalidated // 0) público não validado · \($c.needs_recalibration // 0) recalibrar"' <<<"$j"
   { printf 'PROBLEMA\tPÚBLICO\tVALIDADO\tCALIBRADO\tREVISAR\n'
     jq -r '(.problems//[]) | sort_by(if .needs_review then 0 elif .needs_recalibration then 1 else 2 end) | .[] | "\(.id)\t\(if .public then "sim" else "não" end)\t\(if .validated=="ok" then "OK" elif .validated=="error" then "REPROV" else "—" end)\t\(if .calibrated then "sim" else "não" end)\t\((.review_reasons//[])|join(","))"' <<<"$j"
@@ -230,9 +282,50 @@ gate(){ local d="$1" ok=1
   [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
   [[ $ok -eq 1 ]]; }
-cmd_test(){ local d="${1:-.}"; gate "$d" && echo "ok: pré-voo passou (enunciado, exemplos e solução good presentes)."; }
+# moj test [dir] [--run [sol]] — pré-voo estático; com --run, JULGA localmente delegando ao
+# mojtools/build-and-test.sh (exige checkout do mojtools + Linux com bwrap REAL; no macOS não
+# há sandbox — use 'moj publish/calibrate' + 'moj check', o juiz valida).
+cmd_test(){ local d="." run=0 sol="" a
+  for a in "$@"; do case "$a" in
+    --run) run=1;;
+    --*) die "opção desconhecida: $a (uso: moj test [dir] [--run [sol]])";;
+    *) if [[ -d "$a" ]]; then d="$a"; elif [[ -f "$a" ]]; then sol="$a"; else die "não achei '$a' (dir do pacote ou arquivo de solução)"; fi;;
+  esac; done
+  if gate "$d"; then echo "ok: pré-voo passou (enunciado, exemplos e solução good presentes)."
+  else [[ $run -eq 1 ]] || return 1; echo "  (seguindo p/ o --run mesmo assim)"; fi
+  [[ $run -eq 1 ]] || return 0
+  local mt; mt="$(mojtools_dir)"
+  have bwrap || die "julgamento local exige bwrap (Linux). No macOS/sem sandbox: 'moj publish' ou 'moj calibrate' + 'moj check' — o juiz valida por você."
+  bwrap --version 2>&1 | grep -qi fbwrap && die "o bwrap daqui é o fbwrap (no-op do firejail) — sem sandbox real não dá p/ julgar localmente; use 'moj calibrate' + 'moj check'."
+  # TL de referência: sem tl calibrado no pacote, cria um transitório (CALIBRATIONTL ou 5s)
+  local tltmp=0 ctl=""
+  if [[ ! -f "$d/tl" ]]; then
+    ctl="$(conf_get "$d" CALIBRATIONTL)"; [[ "$ctl" =~ ^[0-9.]+$ ]] || ctl=5
+    printf 'TL[default]=%s\n' "$ctl" > "$d/tl"; tltmp=1
+  fi
+  local sols=() s lang v rc=0
+  if [[ -n "$sol" ]]; then sols=("$sol"); else shopt -s nullglob; sols=("$d"/sols/good/*); shopt -u nullglob; fi
+  if [[ ${#sols[@]} -eq 0 ]]; then [[ $tltmp -eq 1 ]] && rm -f "$d/tl"; die "nada p/ julgar (sols/good vazio)"; fi
+  echo "julgando localmente (mojtools: $mt$( ((tltmp)) && echo "; TL transitório ${ctl}s" ))…"
+  for s in "${sols[@]}"; do
+    lang="${s##*.}"
+    v="$( (cd "$mt" && bash build-and-test.sh "$lang" "$(_abspath "$s")" "$(_abspath "$d")" y) 2>/dev/null | tail -n1 )"
+    printf '  %s -> %s\n' "$(basename "$s")" "${v:-?}"
+    if [[ "$s" == */sols/good/* && ! "$v" =~ ^Accepted ]]; then rc=1; fi
+  done
+  [[ $tltmp -eq 1 ]] && rm -f "$d/tl"
+  return $rc; }
+# atalhos p/ os instaladores do mojtools (autoria local; requerem checkout do mojtools)
+cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp>   (checker testlib normalizado; ver mojtools/docs/checker-testlib.md)"
+  local mt; mt="$(mojtools_dir)"
+  bash "$mt/testlib/install-checker.sh" "$1" "$2"
+  echo "dica: 'moj push $1' já envia scripts/ (round-trip); 'moj test $1 --run' julga local."; }
+cmd_interactive(){ [[ $# -ge 2 ]] || die "uso: moj interactive <dir> <arbitro.cpp|.py|.sh> [--score] [--langs \"...\"]   (ver mojtools/docs/problema-interativo.md)"
+  local mt; mt="$(mojtools_dir)"; local d="$1" arb="$2"; shift 2
+  bash "$mt/interactive/install-interactive.sh" "$d" "$arb" "$@"
+  echo "dica: 'moj push $d' já envia scripts/ (round-trip)."; }
 cmd_push(){ need_login
-  local force=0 d="."; for a in "$@"; do case "$a" in --force) force=1;; *) d="$a";; esac; done
+  local force=0 d="." a; for a in "$@"; do case "$a" in --force) force=1;; --*) die "opção desconhecida: $a (uso: moj push [dir] [--force])";; *) d="$a";; esac; done
   [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new'/'moj clone')."
   local id repo prob; id="$(jq -r .id "$d/.moj-id")"; repo="$(jq -r .repo "$d/.moj-id")"; prob="$(jq -r .prob "$d/.moj-id")"
   # TÍTULO obrigatório: sem ele o problema sai com o nome da pasta (o servidor deriva o slug).
@@ -256,47 +349,68 @@ cmd_push(){ need_login
   fi
   rm -f "$bf" "$bf2"; echo "publique com 'moj publish $id' quando estiver pronto."; }
 
-cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o problema do Gitea e do treino)"
-  local id="$1" c
+cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o problema da base e do treino)"
+  local id="$1" c=""
   echo "⚠ Isto REMOVE o problema '$id' do Gitea e do treino — destrutivo."
   read -rp "Para confirmar, repita o id ($id): " c </dev/tty || true
   [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
   api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
 cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
-  local id="$1" out="${2:-${1##*#}.tar.gz}" auth=() tf; tf="$(token_file)"; [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
-  curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/download?id=$(enc "$id")" -o "$out" || die "falha ao baixar"; echo "baixado: $out"; }
-# _tar_meta_title <arquivo> -> display_title do .moj-meta.json dentro do pacote (best-effort; "" se ausente)
-_tar_meta_title(){ local a="$1" d m t=""; d="$(mktemp -d)"
+  local id="$1" out="${2:-${1##*#}.tar.gz}"
+  api_get_to_file "/problems/download?id=$(enc "$id")" "$out"; echo "baixado: $out"; }
+# _tar_meta_json <arquivo> -> conteúdo do .moj-meta.json dentro do pacote (best-effort; {} se ausente)
+_tar_meta_json(){ local a="$1" d m; d="$(mktemp -d)"
   if [[ "$(head -c2 "$a" 2>/dev/null)" == "PK" ]]; then
     have unzip && unzip -qq -o "$a" '*.moj-meta.json' -d "$d" >/dev/null 2>&1 || true
   else
-    tar -xf "$a" -C "$d" --wildcards '*.moj-meta.json' >/dev/null 2>&1 || true
+    # GNU tar precisa de --wildcards p/ glob; BSD tar faz glob por default (e rejeita a flag)
+    tar -xf "$a" -C "$d" --wildcards '*.moj-meta.json' >/dev/null 2>&1 \
+      || tar -xf "$a" -C "$d" '*.moj-meta.json' >/dev/null 2>&1 || true
   fi
   m="$(find "$d" -name '.moj-meta.json' 2>/dev/null | head -1 || true)"
-  if [[ -n "$m" ]]; then t="$(jq -r '.display_title // ""' "$m" 2>/dev/null || true)"; fi
-  rm -rf "$d"; printf '%s' "$t"; }
-cmd_upload(){ need_login; [[ $# -ge 2 ]] || die "uso: moj upload <id> <arquivo.(tar.gz|tar.bz2|tar.zst|zip)>"
-  [[ -f "$2" ]] || die "arquivo não encontrado: $2"
+  { [[ -n "$m" ]] && cat "$m" 2>/dev/null; } || echo '{}'
+  rm -rf "$d"; }
+cmd_upload(){ need_login
+  local force=0 args=() a
+  for a in "$@"; do case "$a" in --force) force=1;; --*) die "opção desconhecida: $a";; *) args+=("$a");; esac; done
+  [[ ${#args[@]} -ge 1 ]] || die "uso: moj upload <id> [dir|arquivo.(tar.gz|tar.bz2|tar.zst|zip)] [--force]   (dir/omitido = empacota sozinho)"
+  local id="${args[0]}" src="${args[1]:-.}" tarball tmptar=""
+  if [[ -d "$src" ]]; then
+    [[ -f "$src/conf" || -d "$src/tests" ]] || die "'$src' não parece um pacote MOJ (sem conf/tests)"
+    tmptar="$(mktemp)"; tarball="$tmptar"
+    tar -czf "$tarball" -C "$src" --exclude='./.git' --exclude='./.moj-id' \
+        --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.pre-normalizacao*' .
+    echo "empacotado: $src -> $(du -h "$tarball" 2>/dev/null | cut -f1 || echo '?')"
+  elif [[ -f "$src" ]]; then tarball="$src"
+  else die "arquivo/diretório não encontrado: $src"; fi
+  local meta; meta="$(_tar_meta_json "$tarball")"
   # TÍTULO obrigatório no pacote (senão o problema sai com o nome da pasta):
-  local mt; mt="$(_tar_meta_title "$2")"
+  local mt; mt="$(jq -r '.display_title // ""' <<<"$meta" 2>/dev/null)"
   if [[ -z "$mt" ]]; then
-    [[ "${MOJ_ALLOW_NO_TITLE:-}" == 1 ]] || die "o pacote não tem 'display_title' no .moj-meta.json — o problema sairia com o nome da pasta. Inclua display_title no .moj-meta.json do arquivo (ou rode com MOJ_ALLOW_NO_TITLE=1 p/ enviar assim)."
+    [[ $force -eq 1 || "${MOJ_ALLOW_NO_TITLE:-}" == 1 ]] || die "o pacote não tem 'display_title' no .moj-meta.json — o problema sairia com o nome da pasta. Inclua o campo (ou --force p/ enviar assim)."
     echo "  ⚠ sem display_title no pacote — o servidor vai derivar do enunciado/pasta."
   fi
-  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; base64 -w0 < "$2" > "$b64"
-  jq -n --arg id "$1" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
-  api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
+  # footgun documentado: o upload substitui TUDO, inclusive o .moj-meta.json — public:false
+  # no pacote DESPUBLICA um problema público (publique de novo com 'moj public <id> on').
+  # (o `//` do jq engole false — testar com ==, nunca com .public // "ausente")
+  [[ "$(jq -r '.public == false' <<<"$meta" 2>/dev/null)" == true ]] && \
+    echo "  ⚠ o .moj-meta.json do pacote tem public:false — se o problema estiver público, este upload o DESPUBLICA."
+  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; _b64enc "$tarball" > "$b64"
+  jq -n --arg id "$id" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
+  api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'
+  rm -f "$bf" "$b64" ${tmptar:+"$tmptar"}; }
 cmd_export(){ need_login; [[ $# -ge 1 ]] || die "uso: moj export <id> [arquivo.tar.gz]   (pacote ICPC/Kattis)"
-  local id="$1" out="${2:-${1##*#}.icpc.tar.gz}" auth=() tf; tf="$(token_file)"; [[ -f "$tf" ]] && auth=(-H "Authorization: Bearer $(cat "$tf")")
-  curl -fsS "${HDR[@]}" "${auth[@]}" "$MOJ_URL/api/v1/problems/export?id=$(enc "$id")" -o "$out" || die "falha ao exportar"; echo "exportado (ICPC/Kattis): $out"; }
+  local id="$1" out="${2:-${1##*#}.icpc.tar.gz}"
+  api_get_to_file "/problems/export?id=$(enc "$id")" "$out"; echo "exportado (ICPC/Kattis): $out"; }
 cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz|zip)> <pasta> [prob]   (ICPC/Kattis -> MOJ)"
   [[ -f "$1" ]] || die "arquivo não encontrado: $1"
-  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; base64 -w0 < "$1" > "$b64"
+  local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; _b64enc "$1" > "$b64"
   jq -n --arg r "$2" --arg p "${3:-}" --rawfile t "$b64" '{repo:$r, prob:(if $p=="" then null else $p end), tar_b64:$t}' > "$bf"
   api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
   local body; body="$(jq -c '{title, enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
-  local out; out="$(mktemp --suffix=.html)"; api POST "/problems/preview" "$body" | jq -r '.html_b64' | base64 -d > "$out"
+  local out; out="$(mktemp)"; mv "$out" "$out.html"; out="$out.html"   # sem mktemp --suffix (BSD não tem)
+  api POST "/problems/preview" "$body" | jq -r '.html_b64' | _b64dec > "$out"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
 # COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
@@ -408,22 +522,25 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
 # camada agregadora: `moj contest …` delega ao moj-contest (ao lado do script ou no PATH).
 # Padrão p/ camadas futuras: `moj <camada> …` -> executável moj-<camada>.
 exec_layer(){ local layer="$1"; shift
-  local d; d="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  local d; d="$(dirname "$(_abspath "${BASH_SOURCE[0]}")")"
   [[ -x "$d/moj-$layer" ]] && exec "$d/moj-$layer" "$@"
   have "moj-$layer" && exec "moj-$layer" "$@"
   die "camada '$layer' não instalada: curl -fLO $MOJ_URL/moj-$layer && chmod +x moj-$layer"
 }
 
+# --json ANTES do subcomando = saída crua da API nos leitores (ls/board/status/check)
+while [[ "${1:-}" == --json ]]; do RAW=1; shift; done
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   contest) exec_layer contest "$@";;
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
+  checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

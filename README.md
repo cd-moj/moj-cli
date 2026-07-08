@@ -57,11 +57,12 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj edit <id\|dir>` | **editor interativo** (campos da página) |
 | `moj ls [mine\|shared\|public]` · `moj repos` | listas |
 | `moj info <id>` | tudo do problema (dono, público, coleções, validação, contagens) |
-| `moj new <pasta> <prob>` | scaffold completo do pacote em `./<prob>` |
-| `moj clone <id> [dir]` | baixa o pacote **inteiro** (enunciado, conf, exemplos, testes, todas as soluções) |
-| `moj test [dir]` · `moj push [dir] [--force]` | pré-voo local · envia (cria/edita) |
+| `moj new <org> <prob>` | scaffold completo do pacote em `./<prob>` (o 1º arg é a **org** do id `<org>#<prob>`) |
+| `moj clone <id> [dir]` | baixa o pacote **inteiro** (enunciado, conf, exemplos, testes, soluções, **`scripts/` e `tests/score`**) |
+| `moj test [dir] [--run [sol]]` · `moj push [dir] [--force]` | pré-voo local (**`--run` JULGA localmente** via mojtools; Linux+bwrap) · envia (cria/edita; **round-trip completo**, `scripts/` incluído) |
+| `moj checker <dir> <checker.cpp>` · `moj interactive <dir> <arbitro> [--score]` | instala **checker testlib** / **problema interativo** normalizados (requerem checkout local do mojtools; `MOJTOOLS_DIR` aponta) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
-| `moj download <id> [arq]` · `moj upload <id> <arq>` | baixa/sobe o pacote `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
+| `moj download <id> [arq]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro; **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
 | `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**) / calibrar |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
@@ -88,9 +89,11 @@ título (ver "Portão de qualidade").
   tags                      # 1 tag por linha
   tests/input/sample1  tests/output/sample1   # exemplos (pareados; aparecem no enunciado)
   tests/input/<nome>   tests/output/<nome>    # testes ocultos (correção)
-  tests/score               # (opcional) grupos de pontuação por subtarefa
+  tests/score               # (opcional) grupos de pontuação por subtarefa — viaja no push/clone
   sols/{good,wrong,slow,pass,upcoming}/<arquivo>   # soluções por categoria (good = aceita)
-  scripts/                  # (opcional) correção especial (compile/compare por linguagem) — só via 'moj upload'
+  scripts/                  # (opcional) correção especial (compile/compare/checker/árbitro) —
+                            #   VIAJA no push/clone (round-trip completo: conteúdo, +x e symlinks;
+                            #   mexer em scripts/ dispara recalibração no juiz)
   .moj-id                   # ponteiro LOCAL (id/repo/prob/TÍTULO/coleções/público) — NÃO é enviado
 ```
 
@@ -136,5 +139,31 @@ treino livre se o portão passar. Acompanhe com `moj check <id>` (valida/calibra
 
 **Título obrigatório:** `moj push` recusa enviar sem um título (o `.title` do `.moj-id` vazio ou o
 placeholder do `moj new`) — senão o problema fica com o **nome da pasta**. `moj upload` idem: exige
-`display_title` no `.moj-meta.json` do pacote. Escapes: `moj push --force` / `MOJ_ALLOW_NO_TITLE=1
-moj upload …` (o servidor então deriva o título do enunciado/pasta).
+`display_title` no `.moj-meta.json` do pacote. Escape unificado: `--force` (tanto no push quanto no
+upload; `MOJ_ALLOW_NO_TITLE=1` segue aceito por compat).
+
+## Autoria local com o mojtools (checker testlib, interativo, julgar local)
+
+Com um checkout do [mojtools](https://github.com/cd-moj/mojtools) na máquina (irmão do repo da CLI,
+`~/moj/mojtools`, ou `MOJTOOLS_DIR=<caminho>`):
+
+- `moj checker <dir> <checker.cpp>` — instala um **checker testlib** normalizado
+  (`mojtools/docs/checker-testlib.md`).
+- `moj interactive <dir> <arbitro.{cpp,py,sh}> [--score]` — instala o driver de **problema
+  interativo** (`mojtools/docs/problema-interativo.md`).
+- `moj test <dir> --run [sol]` — **julga localmente** com o `build-and-test.sh` (cada `sols/good/*`
+  ou uma solução dada; sem `tl` calibrado usa um TL transitório do `CALIBRATIONTL`). Exige **Linux
+  com bwrap real** — a jaula é a mesma do juiz. No macOS (sem bwrap) e em hosts com fbwrap (dev),
+  o comando explica e aponta o fluxo remoto: `moj publish`/`moj calibrate` + `moj check`.
+
+## macOS
+
+A CLI roda no macOS com **bash ≥ 4** (`brew install bash` — o `/bin/bash` 3.2 da Apple é recusado
+com mensagem clara) e os utilitários BSD nativos (base64/stat/md5/readlink já são tratados de forma
+portável). O que NÃO roda no macOS é o julgamento local (`moj test --run`) — a jaula do juiz é
+Linux (bwrap/namespaces); use o fluxo remoto (`moj publish`/`calibrate`/`check`).
+
+## Saída crua (--json)
+
+`moj --json <ls|board|status|check> …` imprime a resposta da API sem formatação (scripts/pipelines);
+no `moj-contest` a flag global `--json` já existia e continua igual (agora ambos usam o mesmo `out()`).

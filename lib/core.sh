@@ -10,14 +10,51 @@
 # atropelar a sessão do treino. Fallback legado: $CFG/token (só p/ treino; zero migração).
 
 MOJ_TOOL="${MOJ_TOOL:-moj}"
+die(){ printf '%s: %s\n' "$MOJ_TOOL" "$*" >&2; exit 1; }
+# bash>=4 ANTES de qualquer bashismo (mapfile, read -i, ${x^^}): o /bin/bash do macOS é 3.2
+[ "${BASH_VERSINFO[0]:-0}" -ge 4 ] || die "preciso de bash >= 4 (macOS: brew install bash e rode com ele)"
 MOJ_URL="${MOJ_URL:-https://moj.naquadah.com.br}"
 CONTEST="${MOJ_CONTEST:-treino}"
 CFG="${MOJ_CONFIG_DIR:-$HOME/.config/moj}"
 ED="${EDITOR:-${VISUAL:-}}"; [[ -n "$ED" ]] || { command -v nano >/dev/null && ED=nano || ED=vi; }
 HDR=(); [[ -n "${MOJ_HOST:-}" ]] && HDR=(-H "Host: $MOJ_HOST")
-die(){ printf '%s: %s\n' "$MOJ_TOOL" "$*" >&2; exit 1; }
 have(){ command -v "$1" >/dev/null 2>&1; }
 have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
+
+# ---- helpers PORTÁVEIS (Linux/GNU e macOS/BSD) --------------------------------------------
+# base64 de um arquivo, SEM quebra de linha (GNU: -w0; BSD não tem -w e não quebra por default)
+_b64enc(){ base64 -w0 < "$1" 2>/dev/null || base64 < "$1" | tr -d '\n'; }
+# decode de base64 do stdin (GNU: -d; macOS/BSD: -D)
+_b64dec(){ if base64 -d </dev/null >/dev/null 2>&1; then base64 -d; else base64 -D; fi; }
+# mtime em epoch (GNU stat -c %Y; BSD stat -f %m)
+_mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+# hash curto de uma string (md5sum GNU; md5 -q BSD; shasum último recurso)
+_hash(){ { md5sum 2>/dev/null || md5 -q 2>/dev/null || shasum 2>/dev/null; } <<<"$1" | cut -d' ' -f1 | cut -c1-24; }
+# caminho absoluto resolvendo symlinks (GNU readlink -f; fallback cd/pwd -P + readlink em loop)
+_abspath(){
+  if readlink -f "$1" >/dev/null 2>&1; then readlink -f "$1"; return; fi
+  local t="$1" d b i=0
+  while [[ -L "$t" && $i -lt 40 ]]; do d="$(cd "$(dirname "$t")" && pwd -P)"; t="$(readlink "$t")"
+    [[ "$t" == /* ]] || t="$d/$t"; i=$((i+1)); done
+  printf '%s/%s' "$(cd "$(dirname "$t")" && pwd -P)" "$(basename "$t")"
+}
+# epoch -> data legível (GNU date -d @N; BSD date -r N); falha = ecoa o epoch
+_fmt_epoch(){ date -d "@$1" "${2:-+%d/%m %H:%M}" 2>/dev/null || date -r "$1" "${2:-+%d/%m %H:%M}" 2>/dev/null || echo "$1"; }
+
+# ---- saída crua (--json): flag global tratada pelo chamador; out() imprime JSON cru quando
+# RAW=1, senão aplica o filtro jq -r legível. (Antes só o moj-contest tinha.)
+RAW="${RAW:-0}"
+out(){ if [[ "$RAW" == 1 ]]; then cat; else jq -r "$1"; fi; }
+
+# ---- mojtools local (comandos de autoria que rodam NA MÁQUINA: checker/interactive/test --run)
+# Ordem: $MOJTOOLS_DIR -> irmão do checkout da CLI -> ~/moj/mojtools. die com dica de clone.
+mojtools_dir(){
+  local c
+  for c in "${MOJTOOLS_DIR:-}" "$(dirname "$(_abspath "${BASH_SOURCE[1]:-$0}")")/../mojtools" "$HOME/moj/mojtools"; do
+    [[ -n "$c" && -f "$c/build-and-test.sh" ]] && { _abspath "$c"; return 0; }
+  done
+  die "mojtools não encontrado — clone github.com/cd-moj/mojtools e exporte MOJTOOLS_DIR=<caminho>"
+}
 
 # token_file [contest] -> caminho do token daquela sessão (não cria nada)
 # (local a=x b=$a NÃO funciona com set -u: o `local` expande os argumentos antes de atribuir)
@@ -44,8 +81,8 @@ api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die). Token resolvido POR
 # Evita repetir round-trips caros. MOJ_NO_CACHE=1 ignora o cache.
 api_get_cached(){ local ttl="$1" p="$2" cf age out
   [[ "${MOJ_NO_CACHE:-0}" == 1 ]] && { api GET "$p"; return; }
-  cf="$CFG/cache/$(printf '%s' "$p" | md5sum 2>/dev/null | cut -c1-24).json"
-  age=$(( $(date +%s) - $(stat -c %Y "$cf" 2>/dev/null || echo 0) ))
+  cf="$CFG/cache/$(_hash "$p").json"
+  age=$(( $(date +%s) - $(_mtime "$cf") ))
   if [[ -f "$cf" ]] && (( age < ttl )); then cat "$cf"; return 0; fi
   out="$(api GET "$p")" || return 1
   ( umask 077; mkdir -p "$(dirname "$cf")" 2>/dev/null; printf '%s' "$out" > "$cf" ) 2>/dev/null
