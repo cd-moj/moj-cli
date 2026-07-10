@@ -107,12 +107,15 @@ título (ver "Portão de qualidade").
   scripts/                  # (opcional) correção especial (compile/compare/checker/árbitro) —
                             #   VIAJA no push/clone (round-trip completo: conteúdo, +x e symlinks;
                             #   mexer em scripts/ dispara recalibração no juiz)
-  .moj-id                   # ponteiro LOCAL (id/repo/prob/TÍTULO/coleções/público) — NÃO é enviado
+  .moj-id                   # ponteiro LOCAL (id/repo/prob/TÍTULO/coleções/LINGUAGENS/público) — NÃO é enviado
 ```
 
-No servidor os metadados ficam em `.moj-meta.json` (`display_title`, `public`, `collections`, `owner`) —
-gerado a partir do que você envia; você não o edita à mão. `moj push` manda os campos (title do `.moj-id`);
-`moj upload` sobe um `.tar`/`.zip` inteiro (o `.moj-meta.json`, com `display_title`, tem de estar no pacote).
+No servidor os metadados ficam em `.moj-meta.json` (`display_title`, `public`, `collections`,
+`languages`, `owner`) — gerado a partir do que você envia; você não o edita à mão. **`languages`** =
+ids de linguagem de submissão permitidos deste problema (`[]`/ausente = todas; ex.: `["pddl"]` p/ um
+problema que só aceita PDDL); faz round-trip no `.moj-id` (`clone`→edita→`push`). `moj push` manda os
+campos (title/coleções/linguagens do `.moj-id`); `moj upload` sobe um `.tar`/`.zip` inteiro (o
+`.moj-meta.json`, com `display_title` e `languages`, tem de estar no pacote).
 
 ## Gestão de contest (`moj-contest` / `moj contest …`)
 

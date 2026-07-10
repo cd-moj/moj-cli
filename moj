@@ -101,12 +101,13 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
+        --argjson langs "$([[ -f "$d/.moj-id" ]] && jq -c '.languages//[]' "$d/.moj-id" || echo '[]')" \
         --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" --slurpfile scr "$t/scr" \
         --slurpfile good "$t/good" --slurpfile slow "$t/slow" --slurpfile wrong "$t/wrong" \
         --slurpfile pass "$t/pass" --slurpfile up "$t/up" --rawfile scoretxt "$scoref" \
         --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --rawfile editorial "$edf" \
         --arg rtflag "$rtflag" '
-    {title:$title, author:$author, tags:$tags, collections:$colls, enunciado_md:$enun, enunciado_format:$efmt,
+    {title:$title, author:$author, tags:$tags, collections:$colls, languages:$langs, enunciado_md:$enun, enunciado_format:$efmt,
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
     + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
@@ -147,7 +148,7 @@ json_to_pkg(){ local j="$1" d="$2" id="$3"
   # scripts_rt: marca o clone como "ciente do round-trip" — só ele pode APAGAR scripts/score
   # no servidor via push (clone antigo sem scripts materializados não destrói nada).
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --argjson s "$j" \
-    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), public:($s.public//false), scripts_rt:true}' > "$d/.moj-id"; }
+    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), languages:($s.languages//[]), public:($s.public//false), scripts_rt:true}' > "$d/.moj-id"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
 conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
