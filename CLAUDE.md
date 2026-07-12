@@ -16,11 +16,13 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   m:n, ORTOGONAL à org; nome pode ter espaços; curada: só marca em coleção existente).
 - Config por ambiente: `MOJ_URL` (default `https://moj.naquadah.com.br`), `MOJ_HOST` (header
   `Host` p/ teste local), `EDITOR`.
-- É um **cliente** da API — não tem lógica de julgamento própria. O formato de pacote é o do
-  `cdmoj` (ver `cdmoj/CLAUDE.md`, seção "Pacote canônico"). **Título = campo** (`.moj-id` `.title` →
-  `display_title`), **não** o `% Título` do texto (legado); por isso `push`/`upload` exigem título.
-- **Mexeu no formato do pacote?** A descrição em `README.md` ("Pacote do problema") tem de bater com
-  `cdmoj/docs/API.md` + `cdmoj/CLAUDE.md` + `mojtools/CLAUDE.md` — atualize as quatro no mesmo commit.
+- É um **cliente** da API — não tem lógica de julgamento própria. **O formato de pacote tem fonte
+  única: `cdmoj/docs/PACOTE.md`** (inclusive o `.moj-id`, que é ESTE repo quem escreve e que **não**
+  sobe ao servidor). **Título = campo** (`.moj-id` `.title` → `display_title`), **não** o `% Título`
+  do texto (legado); por isso `push`/`upload` exigem título.
+- **Mexeu no formato do pacote?** Atualize o **`cdmoj/docs/PACOTE.md`** (fonte única) no mesmo commit;
+  o `README.md` daqui só resume e aponta p/ ele — não redescreva o formato (a divergência de cópias
+  já gerou o bug do título vazio).
 - **Camadas**: `moj` (autoria de problemas) + `moj-contest` (gestão de contest) + `moj-judges`
   (gerência fina dos juízes: slots/particionamento, config por juiz, relatório de correções —
   sessão `.admin` do treino) compartilham o núcleo SOURCED `lib/core.sh` (config/env,

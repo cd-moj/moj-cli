@@ -86,6 +86,10 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 
 ## Pacote do problema (arquivos)
 
+> **Referência completa do formato: `cdmoj/docs/PACOTE.md`** (fonte única: o que é cada arquivo, os
+> metadados `.moj-meta.json`/`.moj-id`, orgs, coleções, ciclo validar→calibrar→publicar). Roteiro de
+> montar um pacote do zero: `mojtools/README.md`. Abaixo, o resumo p/ quem usa a CLI.
+
 O **título é um CAMPO**, não uma linha no texto: localmente ele fica no `.moj-id` (`.title`); ao
 enviar vira `display_title` no `.moj-meta.json` do servidor e o render injeta o `<h1>`. Um `% Título`
 no topo do enunciado é **legado** (o render o ignora/remove). Por isso `moj push`/`upload` exigem um
