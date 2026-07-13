@@ -76,7 +76,8 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj checker <dir> <checker.cpp>` · `moj interactive <dir> <arbitro> [--score]` | instala **checker testlib** / **problema interativo** normalizados (requerem checkout local do mojtools; `MOJTOOLS_DIR` aponta) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
 | `moj download <id> [arq]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro; **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
-| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**) / calibrar |
+| `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) + pede calibração ao juiz e mostra o relatório. O problema **continua privado** — é o comando para prova em elaboração |
+| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |

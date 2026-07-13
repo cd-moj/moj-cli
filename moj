@@ -17,6 +17,7 @@
 #   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
 #   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
 #   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> [dir|arquivo] [--force]
+#   moj validate <id>             (portão de qualidade + calibração; NÃO publica — pode ser privado)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id>            (--json antes do subcomando = saída crua em ls/board/status/check)
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
@@ -181,6 +182,23 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
   api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" \
     | jq -r 'if .public then "\(.id): PÚBLICO — o servidor VALIDA + CALIBRA (reqid \(.reqid // "?")). Acompanhe com: moj check \(.id)" else "\(.id): despublicado (saiu do treino livre)" end'; }
 cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
+# moj validate <id> — PORTÃO DE QUALIDADE sem publicar: roda o validador estático (enunciado, testes,
+# soluções, seções obrigatórias) + gera o índice, e pede calibração ao juiz. O problema segue PRIVADO
+# — publicar é `moj public <id> on`, e aí a ORG precisa permitir. Espera o relatório novo (o campo
+# `at` muda) e o imprime com o mesmo formato do `moj check`.
+cmd_validate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj validate <id> [--no-wait]"
+  local id="$1" wait=1 a before at i; shift
+  for a in "$@"; do [[ "$a" == --no-wait || "$a" == -n ]] && wait=0; done
+  before="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')"
+  api POST "/problems/validate" "$(jq -n --arg id "$id" '{id:$id}')" \
+    | jq -r '"validação enfileirada: \(.id)" + (if (.reqid // "") != "" then "  (calibração reqid \(.reqid))" else "" end)'
+  [[ "$wait" == 1 ]] || return 0
+  for i in $(seq 1 30); do
+    sleep 2
+    at="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')"
+    [[ "${at:-0}" -gt "${before:-0}" ]] && { echo; cmd_check "$id"; return 0; }
+  done
+  echo "  (o relatório ainda não saiu — veja depois com 'moj check $id')"; }
 cmd_share(){ need_login; [[ $# -ge 2 ]] || die "uso: moj share <org> <login>   (adiciona membro à org — quem edita)"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,add:[$u]}')" | jq -r '"membros da org \(.repo): \(.collaborators|join(", "))"'; }
 cmd_unshare(){ need_login; [[ $# -ge 2 ]] || die "uso: moj unshare <org> <login>"; api POST "/problems/repo-collaborators" "$(jq -n --arg r "$1" --arg u "$2" '{repo:$r,remove:[$u]}')" | jq -r '"membros da org \(.repo): \(.collaborators|join(", "))"'; }
 # gestão de ORGS (o <org> do id <org>#<prob>): membros escrevem em qualquer problema; admins gerem a
@@ -540,6 +558,7 @@ case "$cmd" in
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
   checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
+  validate|validar) cmd_validate "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
