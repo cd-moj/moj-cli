@@ -113,43 +113,96 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
     + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
   rm -rf "$t"; }
-json_to_pkg(){ local j="$1" d="$2" id="$3"
+# json_to_pkg <json-FILE> <dir> <id> — materializa o pacote a partir do /problems/source.
+#
+# O JSON vem em ARQUIVO, NUNCA em variável. Duas razões, as duas graves num pacote grande (o source
+# de um problema de 84 MB tem ~100 MB):
+#   (a) o `--argjson s "$j"` do .moj-id passava o JSON INTEIRO como argumento do execve => estourava o
+#       teto de 128 KiB POR ARGUMENTO ("Argument list too long") => `moj clone` de problema grande
+#       simplesmente NÃO FUNCIONAVA (e deixava o pacote pela metade);
+#   (b) cada `<<<"$j"` regrava o JSON inteiro num temp e o jq re-parseia tudo.
+# Padrão (o mesmo do servidor em apply_problem_fields): uma passada de jq por coleção, stream NUL
+# (--raw-output0) gravado em ARQUIVO, e o laço lê DO ARQUIVO — fd seekable, o bash lê em BLOCO (sobre
+# PIPE o `read` do bash faz 1 syscall POR BYTE).
+#
+# E grava VERBATIM: o servidor já normaliza o \n final. O `jq -r` de antes ACRESCENTAVA um \n a cada
+# arquivo, então o clone nunca era byte-exato (e o tl-checksum do clone nunca batia com o do servidor).
+json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
+  [[ -f "$jf" ]] || { _t="$(mktemp)"; printf '%s' "$jf" > "$_t"; jf="$_t"; }   # compat: veio como string
+  local T; T="$(mktemp -d)"
   mkdir -p "$d/docs" "$d/tests/input" "$d/tests/output"
-  local efmt; efmt="$(jq -r '.format // .enunciado_format // "md"' <<<"$j")"; [[ "$efmt" =~ ^(md|org|tex)$ ]] || efmt=md
-  jq -r '.enunciado_md // ""' <<<"$j" > "$d/docs/enunciado.$efmt"
-  jq -r '.author // ""' <<<"$j" > "$d/author"
-  jq -r '(.tags // [])[]' <<<"$j" > "$d/tags"
-  jq -r '.conf_text // "TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y"' <<<"$j" > "$d/conf"
-  local i=0 p nm; while IFS= read -r p; do i=$((i+1)); jq -r '.input' <<<"$p" > "$d/tests/input/sample$i"; jq -r '.output' <<<"$p" > "$d/tests/output/sample$i"; done < <(jq -c '(.examples//[])[]' <<<"$j")
-  while IFS= read -r p; do nm="$(jq -r '.name//empty' <<<"$p")"; [[ -n "$nm" ]] || continue; jq -r '.input' <<<"$p" > "$d/tests/input/$nm"; jq -r '.output' <<<"$p" > "$d/tests/output/$nm"; done < <(jq -c '(.tests//[])[]' <<<"$j")
-  local cat s fn; for cat in good slow wrong pass upcoming; do mkdir -p "$d/sols/$cat"
-    while IFS= read -r s; do fn="$(jq -r '.filename' <<<"$s")"; [[ -n "$fn" ]] && jq -r '.code' <<<"$s" > "$d/sols/$cat/$fn"; done < <(jq -c --arg c "$cat" '(.sols[$c]//[])[]' <<<"$j"); done
-  # explicações dos exemplos (na ordem) -> docs/sample-notes.json
-  local notes; notes="$(jq -c '[(.examples//[])[] | (.explanation // "")]' <<<"$j")"
-  if [[ "$(jq -r 'map(select(.!=""))|length' <<<"$notes" 2>/dev/null)" -gt 0 ]]; then printf '%s' "$notes" > "$d/docs/sample-notes.json"; else rm -f "$d/docs/sample-notes.json"; fi
-  # resolução/editorial (só setter; não vai p/ o aluno) -> docs/solucao.md
-  local ed; ed="$(jq -r '.editorial_md // ""' <<<"$j")"; if [[ -n "$ed" ]]; then printf '%s' "$ed" > "$d/docs/solucao.md"; else rm -f "$d/docs/solucao.md"; fi
+  local efmt; efmt="$(jq -r '.format // .enunciado_format // "md"' < "$jf")"; [[ "$efmt" =~ ^(md|org|tex)$ ]] || efmt=md
+
+  # escalares: 1 passada
+  jq --raw-output0 '
+      (.enunciado_md // ""),
+      (.author // ""),
+      ((.tags // []) | if length==0 then "" else (join("\n") + "\n") end),
+      (.conf_text // "TLMOD[calibrafactor]=1.35\nULIMITS[-u]=10000\nALLOWPARALLELTEST=y\n"),
+      (.editorial_md // ""),
+      (.score_text // ""),
+      ([(.examples//[])[] | (.explanation // "")] | tojson)
+    ' < "$jf" > "$T/s.nul" 2>/dev/null
+  local S_EN='' S_AU='' S_TG='' S_CF='' S_ED='' S_SC='' S_NT=''
+  { IFS= read -r -d '' S_EN; IFS= read -r -d '' S_AU; IFS= read -r -d '' S_TG; IFS= read -r -d '' S_CF
+    IFS= read -r -d '' S_ED; IFS= read -r -d '' S_SC; IFS= read -r -d '' S_NT; } < "$T/s.nul" 2>/dev/null
+  printf '%s' "$S_EN" > "$d/docs/enunciado.$efmt"
+  printf '%s' "$S_AU" > "$d/author"
+  printf '%s' "$S_TG" > "$d/tags"
+  printf '%s' "$S_CF" > "$d/conf"
+  if [[ -n "$S_ED" ]]; then printf '%s' "$S_ED" > "$d/docs/solucao.md"; else rm -f "$d/docs/solucao.md"; fi
+  if [[ -n "$S_SC" ]]; then printf '%s' "$S_SC" > "$d/tests/score"; else rm -f "$d/tests/score"; fi
+  if [[ "$(jq -r 'map(select(.!=""))|length' <<<"${S_NT:-[]}" 2>/dev/null)" -gt 0 ]]; then
+    printf '%s' "$S_NT" > "$d/docs/sample-notes.json"; else rm -f "$d/docs/sample-notes.json"; fi
+
+  # exemplos e testes: 1 passada cada
+  jq --raw-output0 '(.examples//[])[] | (.input // ""), (.output // "")' < "$jf" > "$T/ex.nul" 2>/dev/null
+  local i=0 a b
+  while IFS= read -r -d '' a && IFS= read -r -d '' b; do i=$((i+1))
+    printf '%s' "$a" > "$d/tests/input/sample$i"; printf '%s' "$b" > "$d/tests/output/sample$i"
+  done < "$T/ex.nul"
+  jq --raw-output0 '(.tests//[])[] | (.name // ""), (.input // ""), (.output // "")' < "$jf" > "$T/t.nul" 2>/dev/null
+  local nm
+  while IFS= read -r -d '' nm && IFS= read -r -d '' a && IFS= read -r -d '' b; do
+    nm="${nm##*/}"; [[ -n "$nm" ]] || continue
+    printf '%s' "$a" > "$d/tests/input/$nm"; printf '%s' "$b" > "$d/tests/output/$nm"
+  done < "$T/t.nul"
+
+  # soluções: 1 passada p/ todas as categorias
+  local cat; for cat in good slow wrong pass upcoming; do mkdir -p "$d/sols/$cat"; done
+  jq --raw-output0 '(.sols // {}) | to_entries[] | .key as $c | ((.value // [])[] | $c, (.filename // ""), (.code // ""))' \
+    < "$jf" > "$T/so.nul" 2>/dev/null
+  local sc fn
+  while IFS= read -r -d '' sc && IFS= read -r -d '' fn && IFS= read -r -d '' a; do
+    [[ "$sc" =~ ^(good|slow|wrong|pass|upcoming)$ ]] || continue
+    fn="${fn##*/}"; [[ "$fn" =~ ^[A-Za-z0-9._-]+$ ]] || continue
+    printf '%s' "$a" > "$d/sols/$sc/$fn"
+  done < "$T/so.nul"
+
   # scripts/ (correção especial) — round-trip: arquivos (base64, +x) e symlinks
   rm -rf "$d/scripts"
-  local sc sp st
-  while IFS= read -r sc; do
-    sp="$(jq -r '.path//empty' <<<"$sc")"; [[ -n "$sp" ]] || continue
+  jq --raw-output0 '(.scripts_files//[])[] | (.path // ""), (.symlink // ""), (if .exec then "1" else "0" end), (.content_b64 // "")' \
+    < "$jf" > "$T/sc.nul" 2>/dev/null
+  local sp st sx sb sdir
+  while IFS= read -r -d '' sp && IFS= read -r -d '' st && IFS= read -r -d '' sx && IFS= read -r -d '' sb; do
+    [[ -n "$sp" ]] || continue
     case "$sp" in /*|*..*) continue;; esac
-    mkdir -p "$d/scripts/$(dirname "$sp")"
-    st="$(jq -r '.symlink//empty' <<<"$sc")"
+    sdir="${sp%/*}"; [[ "$sdir" == "$sp" ]] && sdir=""
+    mkdir -p "$d/scripts${sdir:+/$sdir}"
     if [[ -n "$st" ]]; then ln -sfn "$st" "$d/scripts/$sp"
-    else jq -r '.content_b64//""' <<<"$sc" | _b64dec > "$d/scripts/$sp" 2>/dev/null || : > "$d/scripts/$sp"
-      [[ "$(jq -r '.exec//false' <<<"$sc")" == true ]] && chmod +x "$d/scripts/$sp"
+    else printf '%s' "$sb" | _b64dec > "$d/scripts/$sp" 2>/dev/null || : > "$d/scripts/$sp"
+      [[ "$sx" == 1 ]] && chmod +x "$d/scripts/$sp"
     fi
-  done < <(jq -c '(.scripts_files//[])[]' <<<"$j")
-  # tests/score cru (subtarefas) — round-trip (o $() come o \n final; repõe exatamente 1,
-  # como o _putfile do servidor)
-  local sct; sct="$(jq -r '.score_text // ""' <<<"$j")"
-  if [[ -n "$sct" ]]; then printf '%s\n' "$sct" > "$d/tests/score"; else rm -f "$d/tests/score"; fi
-  # scripts_rt: marca o clone como "ciente do round-trip" — só ele pode APAGAR scripts/score
-  # no servidor via push (clone antigo sem scripts materializados não destrói nada).
-  jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --argjson s "$j" \
-    '{id:$id, repo:$r, prob:$p, title:($s.title//""), format:$fmt, collections:($s.collections//[]), languages:($s.languages//[]), public:($s.public//false), scripts_rt:true}' > "$d/.moj-id"; }
+  done < "$T/sc.nul"
+
+  # .moj-id (metadados do clone; NÃO sobe ao servidor). scripts_rt marca o clone como "ciente do
+  # round-trip": só ele pode APAGAR scripts/score no servidor via push. --slurpfile (não --argjson):
+  # o JSON grande NÃO cabe no argv.
+  jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --slurpfile s "$jf" \
+    '($s[0] // {}) as $src
+     | {id:$id, repo:$r, prob:$p, title:($src.title//""), format:$fmt, collections:($src.collections//[]),
+        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true}' > "$d/.moj-id"
+  rm -rf "$T" "${_t:-}"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
 conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
@@ -293,8 +346,13 @@ cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <org> <prob>"
   echo "criado ./$d  (id $repo#$prob).  edite com 'moj edit $d' ou os arquivos + 'moj push $d'."; }
 cmd_clone(){ need_login; [[ $# -ge 1 ]] || die "uso: moj clone <id> [dir]"
   local id="$1" d="${2:-${1##*#}}"; [[ -e "$d" ]] && die "já existe ./$d"
-  local src; src="$(api GET "/problems/source?id=$(enc "$id")")"
-  json_to_pkg "$src" "$d" "$id"; echo "clonado ./$d  (editable: $(jq -r '.editable' <<<"$src"))"; }
+  # o source vai p/ ARQUIVO: num problema grande são 100+ MB de JSON — em variável o bash copia tudo
+  # e cada jq re-parseia o conjunto (e o .moj-id estourava o argv: "Argument list too long").
+  local sf; sf="$(mktemp)"
+  api_get_to_file "/problems/source?id=$(enc "$id")" "$sf"
+  json_to_pkg "$sf" "$d" "$id"
+  echo "clonado ./$d  (editable: $(jq -r '.editable // false' < "$sf"))"
+  rm -f "$sf"; }
 
 gate(){ local d="$1" ok=1
   [[ -s "$d/docs/enunciado.md" || -s "$d/enunciado.md" ]] || { echo "  ⚠ sem enunciado" >&2; ok=0; }
