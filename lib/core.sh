@@ -79,6 +79,24 @@ auth_hdr_file(){ local c tf h; c="${1:-$CONTEST}"; tf="$(token_file "$c")"; h="$
   fi
   printf '%s' "$h"; }
 
+# _api_fail <http-code> <corpo> — mensagem de erro ÚTIL. Quando o corpo NÃO é JSON (a página de erro
+# do NGINX: 504/502/413), o `jq` saía vazio e o usuário via só "moj:  (504)" — sem pista nenhuma, e
+# sem saber que num timeout o servidor pode ter aplicado o pedido PELA METADE.
+# Com API_SOFT=1 não mata: só devolve !=0 (o chamador trata o código; ver o 409 do push).
+_api_fail(){
+  local code="$1" out="$2" msg
+  msg="$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)"
+  if [[ -z "$msg" ]]; then
+    case "$code" in
+      504|502) msg="o servidor passou do tempo-limite — o pedido PODE ter sido aplicado pela metade; confira com '$MOJ_TOOL info <id>' antes de repetir";;
+      413)     msg="pacote grande demais p/ o servidor (client_max_body_size)";;
+      000|'')  msg="não consegui falar com $MOJ_URL (rede? URL?)";;
+      *)       msg="erro do servidor (resposta não-JSON)";;
+    esac
+  fi
+  [[ "${API_SOFT:-0}" == 1 ]] && return 1
+  die "$msg${code:+ ($code)}"
+}
 api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die). Token resolvido POR CHAMADA.
   local m="$1" p="$2" data="${3:-}" auth=() out code tmp hf; tmp="$(mktemp)"
   hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
@@ -86,7 +104,7 @@ api(){ # api METHOD PATH [json] -> corpo JSON (erro -> die). Token resolvido POR
   else code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"; fi
   out="$(cat "$tmp")"; rm -f "$tmp"
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
-  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
+  _api_fail "$code" "$out"
 }
 # cache local de GET: devolve o que está salvo se ainda fresco (TTL s); senão busca e grava.
 # Evita repetir round-trips caros. MOJ_NO_CACHE=1 ignora o cache.
@@ -102,12 +120,15 @@ http_code(){ local m="$1" p="$2" auth=() hf
   hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
 api_post_file(){ # api_post_file PATH BODYFILE -> POST grande (corpo via arquivo; evita ARG_MAX)
+  # NUNCA chame dentro de um pipe (`api_post_file … | jq`): o `die` mata só o subshell, o `jq` da
+  # ponta sai 0 e o push FALHAVA COM rc=0 — script nenhum detectava. Use `resp="$(api_post_file …)"`.
   local p="$1" f="$2" auth=() out code tmp hf; tmp="$(mktemp)"
   hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
   code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X POST -H 'Content-Type: application/json' --data-binary @"$f" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   out="$(cat "$tmp")"; rm -f "$tmp"
+  API_LAST_CODE="$code"
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
-  die "$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)${code:+ ($code)}"
+  _api_fail "$code" "$out"
 }
 # download autenticado p/ arquivo: api_get_to_file PATH DESTFILE (falha -> die)
 api_get_to_file(){ local p="$1" dest="$2" auth=() code hf

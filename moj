@@ -356,15 +356,27 @@ cmd_push(){ need_login
   if ! gate "$d"; then [[ $force -eq 1 ]] || die "pré-voo falhou (use --force só p/ rascunho privado)."; echo "  (--force: subindo mesmo assim)"; fi
   # corpo via ARQUIVO (testes grandes estouram o argv do jq/curl): pkg_to_json escreve, jq injeta
   # id/repo lendo o arquivo, e o POST vai por api_post_file (--data-binary @arquivo).
-  local bf bf2; bf="$(mktemp)"; bf2="$(mktemp)"
+  local bf bf2 resp; bf="$(mktemp)"; bf2="$(mktemp)"
   pkg_to_json "$d" > "$bf"
-  if [[ "$(http_code GET "/problems/source?id=$(enc "$id")")" == 2* ]]; then
+  # PRÉ-VOO BARATO: /problems/get devolve METADADOS. O /problems/source (o de antes) fazia o servidor
+  # SERIALIZAR O PACOTE INTEIRO (~100 MB num pacote grande) só p/ jogar fora — dobrava o custo do push
+  # e, quando ELE estourava o tempo-limite, o push caía no ramo `create` e tomava 409.
+  # E o POST vai FORA DE PIPE: no pipe, o `die` matava só o subshell e o push falhava com rc=0.
+  if [[ "$(http_code GET "/problems/get?id=$(enc "$id")")" == 2* ]]; then
     jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
-    api_post_file "/problems/edit" "$bf2" | jq -r '"enviado (edit): \(.id)  sha \(.sha)"'
+    resp="$(api_post_file "/problems/edit" "$bf2")" || { rm -f "$bf" "$bf2"; exit 1; }
+    jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
   else
     api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
     jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' "$bf" > "$bf2"
-    api_post_file "/problems/create" "$bf2" | jq -r '"enviado (novo): \(.id)  sha \(.sha)"'
+    if resp="$(API_SOFT=1 api_post_file "/problems/create" "$bf2" 2>/dev/null)"; then
+      jq -r '"enviado (novo): \(.id)  sha \(.sha)"' <<<"$resp"
+    else
+      # 409 "já existe" (índice ainda não enxergou o problema): reenvia como EDIT em vez de morrer
+      jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
+      resp="$(api_post_file "/problems/edit" "$bf2")" || { rm -f "$bf" "$bf2"; exit 1; }
+      jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
+    fi
   fi
   rm -f "$bf" "$bf2"; echo "publique com 'moj publish $id' quando estiver pronto."; }
 
