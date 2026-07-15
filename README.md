@@ -28,10 +28,12 @@ curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && 
 
 | `moj judges` | O que faz (sessão `.admin` do treino) |
 |---|---|
-| `ls` · `show <host>` | saúde dos juízes (slots ocupados/total, partição, cache, TLs) · detalhe + jobs correntes |
+| `ls` · `show <host>` | saúde dos juízes (slots ocupados/total, partição, cache **em disco**, TLs, drenando/desabilitado) · detalhe + jobs correntes **com idade** (`há Xm` — job preso fica óbvio) |
 | `config <host> [--partition off\|numa\|cpus:<X>] [--reserve N] [--disable\|--enable]` | **particiona a máquina em SLOTS** (corrige N problemas ao mesmo tempo, cada job pinado no seu conjunto de cpus); o agente drena e aplica |
+| `reset <host>` · `restart <host>` | **RECUPERAÇÃO sem SSH**: mata os jobs presos (SIGKILL no grupo de processos, reportando) e reconcilia a config; `restart` ainda re-executa o agente — o servidor re-enfileira o que estava atribuído (fila não se perde). Chega MESMO com o juiz travado |
+| `cancel <id> [--inprogress]` | remove calibrações do problema da FILA (pendentes + direcionadas não entregues; em execução só com a flag — prefira `reset`) |
 | `results [host] [-n N]` | relatório de correções por juiz (veredicto, tempo, quem/qual) |
-| `clearcache <host>` · `calibrate <id> [--hosts …]` · `queue` · `status` | operação do parque |
+| `clearcache <host>` · `calibrate <id> [--hosts …]` · `queue` · `status` | operação do parque (`calibrate` repetido NÃO duplica: servidor responde `already_queued`) |
 
 (Os arquivos servidos são auto-contidos — gerados por `mkdist.sh` a partir de `lib/core.sh` +
 cada camada. Rodando do repo, os scripts sourceiam `lib/core.sh` direto.)
