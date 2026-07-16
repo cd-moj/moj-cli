@@ -21,7 +21,8 @@
 #   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
 #   moj validate <id>             (portão de qualidade + calibração; NÃO publica — pode ser privado)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
-#   moj calibrate <id>            (--json antes do subcomando = saída crua em ls/board/status/check)
+#   moj calibrate <id> | --all-stale  (lote: recalibra TUDO que "precisa recalibrar" no painel)
+#   (--json antes do subcomando = saída crua em ls/board/status/check)
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
 #   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
 #   moj collection ls|create|show|add|remove|rename|delete  (coleções = tags de agrupamento, m:n)
@@ -236,7 +237,16 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
   fi
   api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" \
     | jq -r 'if .public then "\(.id): PÚBLICO — o servidor VALIDA + CALIBRA (reqid \(.reqid // "?")). Acompanhe com: moj check \(.id)" else "\(.id): despublicado (saiu do treino livre)" end'; }
-cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
+cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id> | moj calibrate --all-stale"
+  if [[ "$1" == --all-stale ]]; then
+    # recalibra o LOTE inteiro do painel (tudo que "precisa recalibrar"); o servidor recomputa a
+    # lista autorizada e enfileira com dedup+serialização (lote é seguro por construção)
+    api POST "/problems/recalibrate-stale" '{}' | { [[ "$RAW" == 1 ]] && cat || jq -r '
+      "enfileiradas: \(.count) recalibração(ões)",
+      ((.queued // [])[] | "  \(.id)  (reqid \(.reqid))")'; }
+    return
+  fi
+  api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
 # moj validate <id> — PORTÃO DE QUALIDADE sem publicar: roda o validador estático (enunciado, testes,
 # soluções, seções obrigatórias) + gera o índice, e pede calibração ao juiz. O problema segue PRIVADO
 # — publicar é `moj public <id> on`, e aí a ORG precisa permitir. Espera o relatório novo (o campo
@@ -303,6 +313,13 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
   recal="$(jq -r 'if .needs_recalibration then "SIM ⚠" else "não" end' <<<"$tt" 2>/dev/null)"
   miss="$(jq -rc '(.missing_langs // [])|join(", ")' <<<"$ct" 2>/dev/null)"
   printf '%s\n  validado: %s   calibrado: %s   precisa recalibrar: %s\n' "$id" "${validado:-?}" "${calibrado:-?}" "${recal:-?}"
+  # o PORQUÊ da recalibração: quando calibrou, checksums e os commits que afetam o TL desde então
+  if [[ "$(jq -r '.needs_recalibration // false' <<<"$tt" 2>/dev/null)" == true ]]; then
+    jq -r '"  ⚠ MOTIVO: \(.reason // "pacote mudou desde a calibração")"
+           + (if .calibrated_at then "\n    calibrado em: \(.calibrated_at|strftime("%Y-%m-%d %H:%M UTC"))" else "" end)' <<<"$tt" 2>/dev/null
+    jq -r '(.changes // [])[] | "    \(.sha[0:7])  \(.at|strftime("%m-%d %H:%M"))  \(.author)  \(.subject[0:60])"' <<<"$tt" 2>/dev/null
+    jq -r 'if ((.changed_files // [])|length) > 0 then "    arquivos: \(.changed_files|join(", "))" else empty end' <<<"$tt" 2>/dev/null
+  fi
   [[ -n "$miss" ]] && printf '  ⚠ REVISAR: solução good SEM TL em [%s] — falhou em TODAS as máquinas de juiz\n' "$miss"
   echo "  Validação (testado em todos os casos):"
   jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
@@ -682,6 +699,6 @@ case "$cmd" in
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

@@ -81,8 +81,8 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
 | `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
 | `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) + pede calibração ao juiz e mostra o relatório. O problema **continua privado** — é o comando para prova em elaboração |
-| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar |
-| `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
+| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar; **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
+| `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
 | `moj org list\|create\|members\|public\|rm` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda). `rm <nome>` remove uma org **vazia** (a implícita não sai) |
