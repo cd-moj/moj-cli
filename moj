@@ -242,13 +242,16 @@ cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id>"; ap
 cmd_validate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj validate <id> [--no-wait]"
   local id="$1" wait=1 a before at i; shift
   for a in "$@"; do [[ "$a" == --no-wait || "$a" == -n ]] && wait=0; done
-  before="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')"
+  # pre-check INFORMATIVO nunca pode derrubar o comando (set -e): problema recém-subido pode
+  # ainda não estar visível (índice/overlay atrasado) — o GET falha e o validate seguia morrendo
+  # ANTES do POST (derrubou upload em lote; ver lição jq-argmax do overlay authored)
+  before="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')" || before=0
   api POST "/problems/validate" "$(jq -n --arg id "$id" '{id:$id}')" \
     | jq -r '"validação enfileirada: \(.id)" + (if (.reqid // "") != "" then "  (calibração reqid \(.reqid))" else "" end)'
   [[ "$wait" == 1 ]] || return 0
   for i in $(seq 1 30); do
     sleep 2
-    at="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')"
+    at="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null | jq -r '.at // 0')" || at=0
     [[ "${at:-0}" -gt "${before:-0}" ]] && { echo; cmd_check "$id"; return 0; }
   done
   echo "  (o relatório ainda não saiu — veja depois com 'moj check $id')"; }
