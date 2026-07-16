@@ -16,7 +16,9 @@
 #   moj test [dir] [--run [sol]]  (--run JULGA local via mojtools; exige Linux+bwrap real)
 #   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
 #   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
-#   moj preview [dir]             moj download <id> [arquivo]     moj upload <id> [dir|arquivo] [--force]
+#   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
+#   moj log <id> [-n N] | moj log <id> <sha>   (histórico git do problema; com <sha> mostra o diff -p)
+#   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
 #   moj validate <id>             (portão de qualidade + calibração; NÃO publica — pode ser privado)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id>            (--json antes do subcomando = saída crua em ls/board/status/check)
@@ -447,9 +449,53 @@ cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o proble
   read -rp "Para confirmar, repita o id ($id): " c </dev/tty || true
   [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
   api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
-cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo]"
-  local id="$1" out="${2:-${1##*#}.tar.gz}"
-  api_get_to_file "/problems/download?id=$(enc "$id")" "$out"; echo "baixado: $out"; }
+cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo] [--sha <sha>]"
+  local id="$1"; shift
+  local out="" sha="" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in --sha) sha="${1:?}"; shift;; -*) die "opção desconhecida: $a";; *) out="$a";; esac
+  done
+  if [[ -n "$sha" ]]; then
+    [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || die "sha inválido (hex 7-40)"
+    [[ -n "$out" ]] || out="${id##*#}-${sha:0:7}.tar.gz"
+    api_get_to_file "/problems/download?id=$(enc "$id")&sha=$sha" "$out"
+  else
+    [[ -n "$out" ]] || out="${id##*#}.tar.gz"
+    api_get_to_file "/problems/download?id=$(enc "$id")" "$out"
+  fi
+  echo "baixado: $out"; }
+
+# histórico git do problema: lista (sha, data, autor, assunto, ±stats) ou o diff -p de um commit
+cmd_log(){ need_login; [[ $# -ge 1 ]] || die "uso: moj log <id> [-n N] | moj log <id> <sha>"
+  local id="$1"; shift
+  local n=30 sha="" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in -n) n="${1:?}"; shift;; -*) die "opção desconhecida: $a";; *) sha="$a";; esac
+  done
+  if [[ -n "$sha" ]]; then
+    [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || die "sha inválido (hex 7-40)"
+    local j; j="$(api GET "/problems/history?id=$(enc "$id")&sha=$sha")"
+    [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+    jq -r '"commit \(.sha)\nautor:  \(.author)\ndata:   \(.at|strftime("%Y-%m-%d %H:%M UTC"))\n"' <<<"$j"
+    jq -r '.diff_b64' <<<"$j" | base64 -d
+    [[ "$(jq -r '.truncated' <<<"$j")" == true ]] && echo "… (diff truncado em 400 KB)"
+    return 0
+  fi
+  api GET "/problems/history?id=$(enc "$id")&limit=$n" | { [[ "$RAW" == 1 ]] && cat || jq -r '
+    .commits[] | [ (.sha[0:7]), (.at|strftime("%Y-%m-%d %H:%M")), .author,
+                   (.subject[0:60]), "\(.files)a +\(.insertions) −\(.deletions)" ] | @tsv' \
+    | column -t -s$'\t'; }; }
+
+# restaura versão antiga como um COMMIT NOVO (história preservada; meta/público intactos)
+cmd_restore(){ need_login; [[ $# -ge 2 ]] || die "uso: moj restore <id> <sha>   (veja os sha com 'moj log <id>')"
+  local id="$1" sha="$2" c=""
+  [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || die "sha inválido (hex 7-40)"
+  echo "⚠ Isto restaura '$id' ao estado do commit $sha como um commit NOVO."
+  echo "  (a história não é reescrita; público/coleções atuais são preservados)"
+  read -rp "Para confirmar, repita o sha ($sha): " c </dev/tty || true
+  [[ "$c" == "$sha" ]] || die "confirmação não bateu — nada foi restaurado."
+  api POST "/problems/restore" "$(jq -n --arg id "$id" --arg s "$sha" '{id:$id, sha:$s, confirm:$s}')" \
+    | out '"restaurado: \(.id) <- \(.from[0:7])  (novo commit \(.sha))"'; }
 # _tar_meta_json <arquivo> -> conteúdo do .moj-meta.json dentro do pacote (best-effort; {} se ausente)
 _tar_meta_json(){ local a="$1" d m; d="$(mktemp -d)"
   if [[ "$(head -c2 "$a" 2>/dev/null)" == "PK" ]]; then
@@ -631,10 +677,11 @@ case "$cmd" in
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
   checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
+  log|history) cmd_log "$@";; restore) cmd_restore "$@";;
   validate|validar) cmd_validate "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

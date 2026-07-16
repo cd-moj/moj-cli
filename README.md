@@ -77,7 +77,9 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj test [dir] [--run [sol]]` · `moj push [dir] [--force]` | pré-voo local (**`--run` JULGA localmente** via mojtools; Linux+bwrap) · envia (cria/edita; **round-trip completo**, `scripts/` incluído) |
 | `moj checker <dir> <checker.cpp>` · `moj interactive <dir> <arbitro> [--score]` | instala **checker testlib** / **problema interativo** normalizados (requerem checkout local do mojtools; `MOJTOOLS_DIR` aponta) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
-| `moj download <id> [arq]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro; **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
+| `moj download <id> [arq] [--sha <sha>]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro (`--sha` = a versão daquele commit); **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
+| `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
+| `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
 | `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) + pede calibração ao juiz e mostra o relatório. O problema **continua privado** — é o comando para prova em elaboração |
 | `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas) |
