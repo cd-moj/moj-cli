@@ -584,9 +584,9 @@ cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
       local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")" | jq -c '.collections // []')"
       api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:($c|map(select(.!=$n)))}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
     rename) [[ $# -ge 2 ]] || die "uso: moj collection rename \"<nome>\" \"<novo>\""
-      api POST "/problems/collection-rename" "$(jq -n --arg n "$1" --arg t "$2" '{name:$n, to:$t}')" | jq -r '"renomeada: \(.from) -> \(.name) (\(.retagged) problemas re-taggeados)"';;
+      api POST "/problems/collection-rename" "$(jq -n --arg n "$1" --arg t "$2" '{name:$n, to:$t}')" | jq -r '"renomeada: \(.from) -> \(.name) (re-tag dos problemas em segundo plano" + (if .resumed then "; RETOMADA de bulk interrompido" else "" end) + ")"';;
     delete|del) [[ $# -ge 1 ]] || die "uso: moj collection delete \"<nome>\""
-      api POST "/problems/collection-delete" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"excluída: \(.name) (\(.untagged) problemas destaggeados)"';;
+      api POST "/problems/collection-delete" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"excluída: \(.name) (untag dos problemas em segundo plano; some do registro ao final)"';;
     *) die "subcomando de coleção: ls | create | show | add | remove | rename | delete";;
   esac; }
 
