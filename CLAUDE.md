@@ -31,8 +31,10 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   delega ao executável `moj-<camada>` (ao lado do script ou no PATH) — padrão p/ camadas
   futuras. `bash -euo pipefail` em todos; `bash -n` antes de commitar.
 - **Distribuição continua de 1 arquivo**: `bash mkdist.sh` embute a lib nos artefatos
-  `dist/{moj,moj-contest}` (marcadores `# @INLINE-BEGIN/END`); são ELES que o cdmoj serve em
-  `web/moj`/`web/moj-contest` (ver `cdmoj/docs/DEPLOY.md`). Nunca copie o script do repo direto.
+  `dist/{moj,moj-contest,moj-judges}` (marcadores `# @INLINE-BEGIN/END`); são ELES que o cdmoj
+  serve em `web/moj*` (ver `cdmoj/docs/DEPLOY.md`). Nunca copie o script do repo direto.
+  **O `make deploy` do cdmoj sincroniza sozinho** (alvo `cli-dist` roda o mkdist do checkout
+  irmão e copia o que divergir) — mudou a CLI, o próximo deploy embarca.
 - Pegadinha de bash: `local a=x b=$a` NÃO funciona com `set -u` (o `local` expande os argumentos
   antes de atribuir) — declare e atribua em comandos separados.
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
