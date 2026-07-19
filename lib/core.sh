@@ -10,6 +10,9 @@
 # atropelar a sessão do treino. Fallback legado: $CFG/token (só p/ treino; zero migração).
 
 MOJ_TOOL="${MOJ_TOOL:-moj}"
+# carimbo de build: "dev" no repo; o mkdist.sh troca pelo <git-short>-<data> nos artefatos
+# distribuídos (é o que `moj version`/`doctor` comparam com o /moj.build do servidor)
+MOJ_CLI_BUILD="dev"
 die(){ printf '%s: %s\n' "$MOJ_TOOL" "$*" >&2; exit 1; }
 # bash>=4 ANTES de qualquer bashismo (mapfile, read -i, ${x^^}): o /bin/bash do macOS é 3.2
 [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] || die "preciso de bash >= 4 (macOS: brew install bash e rode com ele)"
@@ -50,10 +53,12 @@ out(){ if [[ "$RAW" == 1 ]]; then cat; else jq -r "$1"; fi; }
 # Ordem: $MOJTOOLS_DIR -> irmão do checkout da CLI -> ~/moj/mojtools. die com dica de clone.
 mojtools_dir(){
   local c
+  [[ -n "${MOJTOOLS_DIR:-}" && ! -f "${MOJTOOLS_DIR}/build-and-test.sh" ]] \
+    && echo "$MOJ_TOOL: ⚠ MOJTOOLS_DIR aponta p/ caminho inválido ($MOJTOOLS_DIR) — tentando os fallbacks" >&2
   for c in "${MOJTOOLS_DIR:-}" "$(dirname "$(_abspath "${BASH_SOURCE[1]:-$0}")")/../mojtools" "$HOME/moj/mojtools"; do
     [[ -n "$c" && -f "$c/build-and-test.sh" ]] && { _abspath "$c"; return 0; }
   done
-  die "mojtools não encontrado — clone github.com/cd-moj/mojtools e exporte MOJTOOLS_DIR=<caminho>"
+  die "mojtools não encontrado — só é preciso p/ checker/interactive/test --run: git clone https://github.com/cd-moj/mojtools ~/moj/mojtools (ou exporte MOJTOOLS_DIR). Diagnóstico: $MOJ_TOOL doctor"
 }
 
 # token_file [contest] -> caminho do token daquela sessão (não cria nada)

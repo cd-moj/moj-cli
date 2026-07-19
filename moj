@@ -13,7 +13,9 @@
 #                                    validação, time-limits por juiz, solução good sem TL)
 #   moj new <org> <prob>          moj clone <id> [dir]            moj info <id>
 #   moj edit <id|dir>             moj push [dir] [--force]        (push/clone levam scripts/ e tests/score)
-#   moj test [dir] [--run [sol]]  (--run JULGA local via mojtools; exige Linux+bwrap real)
+#   moj test [dir] [--run [sol]]  (--run JULGA local via mojtools; exige Linux+bwrap real;
+#                                  com tests/score confere os GRUPOS localmente)
+#   moj doctor | version | update (diagnóstico do ambiente · build local×servidor · auto-atualiza)
 #   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
 #   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
 #   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
@@ -376,10 +378,50 @@ cmd_clone(){ need_login; [[ $# -ge 1 ]] || die "uso: moj clone <id> [dir]"
   echo "clonado ./$d  (editable: $(jq -r '.editable // false' < "$sf"))"
   rm -f "$sf"; }
 
+# conferência LOCAL do tests/score — espelha a semântica do juiz (mojtools/score-summary.sh):
+# "#" = comentário; linha de grupo = '<glob>[, <glob>…] - <N> pontos'; teste casa o grupo por
+# prefixo-sem-dígitos-finais, nome exato OU glob real. Mostra a distribuição e acusa ANTES de
+# enviar o que quebraria no juiz (teste órfão ZERA a submissão; grupo peso>0 sem teste = Wrong).
+score_gate(){ local d="$1" ok=1
+  local pats=() wts=() bad="" nog="" _g _s _p _pl pn b gn hit gi n f
+  local -A cnt=()
+  shopt -s extglob
+  while IFS='-' read -r _g _s || [[ -n "$_g" ]]; do
+    [[ "$_g" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${_g//[[:space:]]/}" ]] && continue
+    if [[ -z "${_s//[^0-9]/}" ]]; then bad+="'$_g' "; continue; fi
+    _pl=""
+    set -f; for _p in $_g; do _p="${_p%,}"; _pl+="${_pl:+ }$_p"; done; set +f
+    pats+=("$_pl"); wts+=("${_s//[^0-9]/}")
+  done < "$d/tests/score"
+  for f in "$d/tests/input"/*; do
+    [[ -e "$f" ]] || continue; b="${f##*/}"; gn="${b%%+([0-9])}"
+    hit=""
+    for gi in "${!pats[@]}"; do
+      set -f
+      for _p in ${pats[$gi]}; do
+        pn="${_p%\**}"
+        if [[ "$b" == "$pn" || "$gn" == "$pn" || "$b" == $_p ]]; then hit="$gi"; break 2; fi
+      done
+      set +f
+    done
+    set +f
+    if [[ -n "$hit" ]]; then cnt[$hit]=$(( ${cnt[$hit]:-0} + 1 )); else nog+="$b "; fi
+  done
+  echo "  tests/score: ${#wts[@]} grupo(s)"
+  for gi in "${!pats[@]}"; do
+    n="${cnt[$gi]:-0}"
+    printf '    %s - %s pontos: %s teste(s)\n' "${pats[$gi]}" "${wts[$gi]}" "$n"
+    if [[ "$n" -eq 0 && "${wts[$gi]}" -gt 0 ]]; then echo "  ⚠ grupo de peso>0 sem NENHUM teste: '${pats[$gi]}'" >&2; ok=0; fi
+  done
+  [[ -n "$bad" ]] && { echo "  ⚠ linha inválida no tests/score (não é '<globs> - N pontos'; o juiz ignora): $bad" >&2; ok=0; }
+  [[ -n "$nog" ]] && { echo "  ⚠ teste SEM grupo (ZERA a submissão no juiz): $nog" >&2; ok=0; }
+  [[ $ok -eq 1 ]]; }
 gate(){ local d="$1" ok=1
   [[ -s "$d/docs/enunciado.md" || -s "$d/enunciado.md" ]] || { echo "  ⚠ sem enunciado" >&2; ok=0; }
   [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
+  if [[ -f "$d/tests/score" ]]; then score_gate "$d" || ok=0; fi
   [[ $ok -eq 1 ]]; }
 # moj test [dir] [--run [sol]] — pré-voo estático; com --run, JULGA localmente delegando ao
 # mojtools/build-and-test.sh (exige checkout do mojtools + Linux com bwrap REAL; no macOS não
@@ -406,14 +448,86 @@ cmd_test(){ local d="." run=0 sol="" a
   if [[ -n "$sol" ]]; then sols=("$sol"); else shopt -s nullglob; sols=("$d"/sols/good/*); shopt -u nullglob; fi
   if [[ ${#sols[@]} -eq 0 ]]; then [[ $tltmp -eq 1 ]] && rm -f "$d/tl"; die "nada p/ julgar (sols/good vazio)"; fi
   echo "julgando localmente (mojtools: $mt$( ((tltmp)) && echo "; TL transitório ${ctl}s" ))…"
+  local errf; errf="$(mktemp)"
   for s in "${sols[@]}"; do
     lang="${s##*.}"
-    v="$( (cd "$mt" && bash build-and-test.sh "$lang" "$(_abspath "$s")" "$(_abspath "$d")" y) 2>/dev/null | tail -n1 )"
+    v="$( (cd "$mt" && bash build-and-test.sh "$lang" "$(_abspath "$s")" "$(_abspath "$d")" y) 2>"$errf" | tail -n1 )"
     printf '  %s -> %s\n' "$(basename "$s")" "${v:-?}"
+    if [[ -z "$v" ]]; then   # julgamento mudo = ambiente quebrado, não engolir o porquê
+      { echo "  ⚠ o julgamento não produziu veredicto — últimas linhas do erro:"
+        tail -n 5 "$errf" | sed 's/^/    | /'
+        echo "  (diagnóstico do ambiente: $MOJ_TOOL doctor)"; } >&2
+      rc=1
+    fi
     if [[ "$s" == */sols/good/* && ! "$v" =~ ^Accepted ]]; then rc=1; fi
   done
+  rm -f "$errf"
   [[ $tltmp -eq 1 ]] && rm -f "$d/tl"
   return $rc; }
+# ---- diagnóstico / versão / atualização --------------------------------------------------
+_server_build(){ curl -fsS --max-time 3 "${HDR[@]}" "$MOJ_URL/moj.build" 2>/dev/null | head -1 || true; }
+cmd_version(){ local srv
+  echo "$MOJ_TOOL build: $MOJ_CLI_BUILD"
+  srv="$(_server_build)"
+  if [[ -n "$srv" ]]; then
+    echo "servidor ($MOJ_URL): build $srv"
+    [[ "$MOJ_CLI_BUILD" == dev || "$MOJ_CLI_BUILD" == "$srv" ]] || echo "  ⚠ DESATUALIZADO — rode: $MOJ_TOOL update"
+  else
+    echo "servidor ($MOJ_URL): build indisponível"
+  fi }
+cmd_update(){ local self dir t dst tmp new nup=0 old="$MOJ_CLI_BUILD"
+  self="$(readlink -f "$(_abspath "${BASH_SOURCE[0]}")" 2>/dev/null || _abspath "${BASH_SOURCE[0]}")"
+  dir="$(dirname "$self")"
+  for t in moj moj-contest moj-judges; do
+    dst="$dir/$t"
+    [[ "$t" == "${self##*/}" || -f "$dst" ]] || continue     # o próprio + as camadas presentes
+    tmp="$(mktemp "$dst.new.XXXXXX" 2>/dev/null)" || die "sem permissão de escrita em $dir — rode: sudo $MOJ_TOOL update"
+    curl -fsS --max-time 60 "${HDR[@]}" -o "$tmp" "$MOJ_URL/$t" || { rm -f "$tmp"; die "download falhou: $MOJ_URL/$t"; }
+    bash -n "$tmp" 2>/dev/null || { rm -f "$tmp"; die "artefato baixado inválido ($t) — nada foi trocado"; }
+    chmod +x "$tmp"; mv -f "$tmp" "$dst"
+    nup=$((nup+1))
+  done
+  new="$(grep -m1 '^MOJ_CLI_BUILD=' "$dir/${self##*/}" 2>/dev/null | cut -d'"' -f2)"
+  echo "atualizado: $nup artefato(s) em $dir (build $old -> ${new:-?})"; }
+cmd_doctor(){ local bad=0 srv mt="" c head
+  echo "$MOJ_TOOL doctor — diagnóstico do ambiente"
+  echo "· build local: $MOJ_CLI_BUILD"
+  srv="$(_server_build)"
+  if [[ -n "$srv" ]]; then
+    if [[ "$MOJ_CLI_BUILD" != dev && "$MOJ_CLI_BUILD" != "$srv" ]]; then
+      echo "✗ DESATUALIZADO: o servidor serve o build $srv — rode: $MOJ_TOOL update"; bad=1
+    else echo "✓ servidor $MOJ_URL: build $srv"; fi
+  else echo "· servidor $MOJ_URL: /moj.build indisponível (não deu p/ conferir atualização)"; fi
+  have jq   || { echo "✗ jq AUSENTE — a CLI inteira depende dele (instale jq)"; bad=1; }
+  have curl || { echo "✗ curl AUSENTE"; bad=1; }
+  echo "· bash $BASH_VERSION · jq $(jq --version 2>/dev/null || echo '—') · curl $(curl --version 2>/dev/null | head -1 | awk '{print $2}')"
+  # mojtools (só p/ checker/interactive/test --run): qual candidato responde?
+  if [[ -n "${MOJTOOLS_DIR:-}" && ! -f "${MOJTOOLS_DIR}/build-and-test.sh" ]]; then
+    echo "✗ MOJTOOLS_DIR aponta p/ caminho inválido: $MOJTOOLS_DIR (sem build-and-test.sh)"; bad=1
+  fi
+  for c in "${MOJTOOLS_DIR:-}" "$(dirname "$(_abspath "${BASH_SOURCE[0]}")")/../mojtools" "$HOME/moj/mojtools"; do
+    [[ -n "$c" && -f "$c/build-and-test.sh" ]] && { mt="$(_abspath "$c")"; break; }
+  done
+  if [[ -n "$mt" ]]; then
+    echo "✓ mojtools: $mt$([[ -n "${MOJTOOLS_DIR:-}" && "$mt" == "$(_abspath "$MOJTOOLS_DIR")" ]] && echo ' (via MOJTOOLS_DIR)')"
+    head="$(git -C "$mt" log -1 --format='%h de %cs' 2>/dev/null || true)"
+    [[ -n "$head" ]] && echo "  · versão local: $head — atualize com: git -C '$mt' pull"
+  else
+    echo "· mojtools não encontrado (procurei: \$MOJTOOLS_DIR, ../mojtools do script, ~/moj/mojtools)"
+    echo "  só é necessário p/ 'moj checker', 'moj interactive' e 'moj test --run'. Para instalar:"
+    echo "  git clone https://github.com/cd-moj/mojtools ~/moj/mojtools   (ou exporte MOJTOOLS_DIR)"
+  fi
+  # bwrap (só p/ test --run)
+  if ! have bwrap; then
+    echo "· bwrap ausente — 'moj test --run' (julgamento local) NÃO funciona aqui; use 'moj calibrate' + 'moj check' (o juiz valida)"
+  elif bwrap --version 2>&1 | grep -qi fbwrap; then
+    echo "· bwrap = fbwrap (no-op) — sem sandbox real; 'moj test --run' recusa; use 'moj calibrate' + 'moj check'"
+  else
+    echo "✓ bwrap real ($(bwrap --version 2>/dev/null)) — 'moj test --run' disponível"
+  fi
+  if [[ -f "$(token_file)" ]]; then echo "✓ sessão: logado ($CONTEST em $MOJ_URL)"; else echo "· sessão: sem login (rode: $MOJ_TOOL login)"; fi
+  if (( bad == 0 )); then echo "tudo certo."; else echo "há itens ✗ acima."; fi
+  return $bad; }
 # atalhos p/ os instaladores do mojtools (autoria local; requerem checkout do mojtools)
 cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp>   (checker testlib normalizado; ver mojtools/docs/checker-testlib.md)"
   local mt; mt="$(mojtools_dir)"
@@ -696,9 +810,10 @@ case "$cmd" in
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   log|history) cmd_log "$@";; restore) cmd_restore "$@";;
   validate|validar) cmd_validate "$@";;
+  doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update|selfupdate) cmd_update "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

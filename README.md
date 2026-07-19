@@ -14,6 +14,11 @@ Precisa de `bash`, `curl`, `jq` (e um editor para `moj edit`, via `$EDITOR`). Ba
 curl -fsSL https://moj.naquadah.com.br/moj -o ~/.local/bin/moj && chmod +x ~/.local/bin/moj
 ```
 
+Depois disso, **`moj update` atualiza a própria CLI** (baixa os artefatos servidos e troca no
+lugar), `moj version` compara o seu build com o do servidor e **`moj doctor` diagnostica o
+ambiente** (atualização, jq/curl, mojtools, bwrap, sessão) — comece por ele quando algo parecer
+estranho.
+
 Para a camada de **gestão de contest** (`moj contest …` / `moj-contest`), baixe também:
 
 ```bash
@@ -74,7 +79,8 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj info <id>` | tudo do problema (dono, público, coleções, validação, contagens) |
 | `moj new <org> <prob>` | scaffold completo do pacote em `./<prob>` (o 1º arg é a **org** do id `<org>#<prob>`) |
 | `moj clone <id> [dir]` | baixa o pacote **inteiro** (enunciado, conf, exemplos, testes, soluções, **`scripts/` e `tests/score`**) |
-| `moj test [dir] [--run [sol]]` · `moj push [dir] [--force]` | pré-voo local (**`--run` JULGA localmente** via mojtools; Linux+bwrap) · envia (cria/edita; **round-trip completo**, `scripts/` incluído) |
+| `moj test [dir] [--run [sol]]` · `moj push [dir] [--force]` | pré-voo local (**com `tests/score` confere os GRUPOS**: distribuição por grupo, teste órfão, linha inválida — antes de enviar; **`--run` JULGA localmente** via mojtools; Linux+bwrap) · envia (cria/edita; **round-trip completo**, `scripts/` incluído) |
+| `moj doctor` · `moj version` · `moj update` | **diagnóstico do ambiente** (atualização, jq/curl, mojtools, bwrap, sessão) · build local×servidor · **auto-atualiza** a CLI baixando os artefatos servidos |
 | `moj checker <dir> <checker.cpp>` · `moj interactive <dir> <arbitro> [--score]` | instala **checker testlib** / **problema interativo** normalizados (requerem checkout local do mojtools; `MOJTOOLS_DIR` aponta) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
 | `moj download <id> [arq] [--sha <sha>]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro (`--sha` = a versão daquele commit); **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
