@@ -486,31 +486,7 @@ cmd_test(){ local d="." run=0 sol="" a
   rm -f "$outf" "$errf"
   [[ $tltmp -eq 1 ]] && rm -f "$d/tl"
   return $rc; }
-# ---- diagnóstico / versão / atualização --------------------------------------------------
-_server_build(){ curl -fsS --max-time 3 "${HDR[@]}" "$MOJ_URL/moj.build" 2>/dev/null | head -1 || true; }
-cmd_version(){ local srv
-  echo "$MOJ_TOOL build: $MOJ_CLI_BUILD"
-  srv="$(_server_build)"
-  if [[ -n "$srv" ]]; then
-    echo "servidor ($MOJ_URL): build $srv"
-    [[ "$MOJ_CLI_BUILD" == dev || "$MOJ_CLI_BUILD" == "$srv" ]] || echo "  ⚠ DESATUALIZADO — rode: $MOJ_TOOL update"
-  else
-    echo "servidor ($MOJ_URL): build indisponível"
-  fi }
-cmd_update(){ local self dir t dst tmp new nup=0 old="$MOJ_CLI_BUILD"
-  self="$(readlink -f "$(_abspath "${BASH_SOURCE[0]}")" 2>/dev/null || _abspath "${BASH_SOURCE[0]}")"
-  dir="$(dirname "$self")"
-  for t in moj moj-contest moj-judges; do
-    dst="$dir/$t"
-    [[ "$t" == "${self##*/}" || -f "$dst" ]] || continue     # o próprio + as camadas presentes
-    tmp="$(mktemp "$dst.new.XXXXXX" 2>/dev/null)" || die "sem permissão de escrita em $dir — rode: sudo $MOJ_TOOL update"
-    curl -fsS --max-time 60 "${HDR[@]}" -o "$tmp" "$MOJ_URL/$t" || { rm -f "$tmp"; die "download falhou: $MOJ_URL/$t"; }
-    bash -n "$tmp" 2>/dev/null || { rm -f "$tmp"; die "artefato baixado inválido ($t) — nada foi trocado"; }
-    chmod +x "$tmp"; mv -f "$tmp" "$dst"
-    nup=$((nup+1))
-  done
-  new="$(grep -m1 '^MOJ_CLI_BUILD=' "$dir/${self##*/}" 2>/dev/null | cut -d'"' -f2)"
-  echo "atualizado: $nup artefato(s) em $dir (build $old -> ${new:-?})"; }
+# ---- diagnóstico (version/update/_server_build vêm da lib/core.sh — comuns às camadas) ----
 cmd_doctor(){ local bad=0 srv mt="" c head
   echo "$MOJ_TOOL doctor — diagnóstico do ambiente"
   echo "· build local: $MOJ_CLI_BUILD"
@@ -825,6 +801,7 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   contest) exec_layer contest "$@";;
   judges) exec_layer judges "$@";;
+  comp|aluno) exec_layer comp "$@";;
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;

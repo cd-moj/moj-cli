@@ -132,6 +132,18 @@ problema que só aceita PDDL); faz round-trip no `.moj-id` (`clone`→edita→`p
 campos (title/coleções/linguagens do `.moj-id`); `moj upload` sobe um `.tar`/`.zip` inteiro (o
 `.moj-meta.json`, com `display_title` e `languages`, tem de estar no pacote).
 
+## CLI do competidor (`moj-comp` / `moj comp …`)
+
+CLI do **aluno/competidor** dentro de um contest: `login <cid|url>`, `fetch` (baixa todos os
+enunciados p/ trabalhar sem rede), `problems`, `submit <letra> <arquivo>` (espera o veredicto),
+`subs`, `score`, `news`, `clar ls|ask`, `time`, `doctor`. E o **modo emergencial de queda de
+Internet**: quando o `submit` não alcança o servidor, a submissão é EMPACOTADA cifrada (chave
+pública do contest, recebida no login) com o horário UTC corrente corrigido pelo desvio medido
+do relógio; `moj-comp monitor` fica vigiando, reenvia sozinho quando a rede volta e a submissão
+**conta no horário do carimbo** (rota `/contest/offline-submit`; o carimbo é cercado por um
+beacon assinado do servidor + a chegada — ver `cdmoj/docs/FLOW.md` §7½). Guia do competidor:
+`/contest/cli.html` no servidor. Requisitos: bash, curl, jq, **openssl**.
+
 ## Gestão de contest (`moj-contest` / `moj contest …`)
 
 CLI da camada de **contest** — cria, reaproveita e administra contests pela API (os mesmos

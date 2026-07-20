@@ -1,0 +1,364 @@
+#!/usr/bin/env bash
+# moj-comp — CLI do COMPETIDOR do MOJ (camada 'comp'; `moj comp …` delega aqui).
+# Enviar soluções, acompanhar veredictos, placar e clarifications — e o modo EMERGENCIAL:
+# caiu a Internet, a CLI empacota a submissão CIFRADA com a hora UTC corrente e reenvia
+# quando a rede volta; a submissão conta NO HORÁRIO em que você a criou (penalidade justa).
+#
+#   moj-comp login <cid|url> [-u login]   (credenciais entregues pela organização)
+#   moj-comp logout | whoami | time       (time = seu relógio × o do servidor)
+#   moj-comp fetch                        (baixa TODOS os enunciados p/ ./<cid>-prova/ — RODE NO COMEÇO)
+#   moj-comp problems                     moj-comp score
+#   moj-comp submit <letra> <arquivo>     (envia e espera o veredicto; sem rede -> empacota sozinho)
+#   moj-comp subs                         (suas submissões e veredictos)
+#   moj-comp clar ls | ask <letra|geral> <pergunta>
+#   moj-comp news
+#   moj-comp outbox | sync                (fila offline | reenviar agora)
+#   moj-comp monitor                      (DEIXE RODANDO na queda: mostra a fila, reenvia
+#                                          sozinho e acompanha os veredictos quando voltar)
+#   moj-comp version | update | doctor
+# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_CONTEST (= -c). Requisitos:
+# bash, curl, jq, openssl. Sem root, sem instalação: um arquivo.
+# @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
+_moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
+[[ -f "$_MOJ_LIB" ]] || { printf 'moj-comp: lib/core.sh não encontrada (rode do repo, ou use o artefato de dist/mkdist.sh)\n' >&2; exit 1; }
+MOJ_TOOL=moj-comp
+source "$_MOJ_LIB"
+# @INLINE-END
+MOJ_TOOL=moj-comp
+set -euo pipefail
+
+# base64 de ARQUIVO numa linha, portável (GNU tem -w0; BSD/macOS não) — e o resultado vai
+# p/ jq via --rawfile/stdin, NUNCA por argv (código grande estoura os 128KiB por argumento)
+_b64file(){ base64 < "$1" | tr -d '\n'; }
+# sha256 do stdin, portável (macOS não tem sha256sum; tem shasum)
+_sha256(){ if have sha256sum; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi; }
+
+CONTEST_SET=0; [[ -n "${MOJ_CONTEST:-}" ]] && CONTEST_SET=1
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -c|--contest) [[ $# -ge 2 ]] || die "uso: -c <contest>"; CONTEST="$2"; CONTEST_SET=1; shift 2;;
+    --json) RAW=1; shift;;
+    *) break;;
+  esac
+done
+
+# estado local da sessão de prova: ~/.config/moj/comp-<cid>/
+#   pub.pem (chave pública do contest) · beacon (último beacon assinado) · offset (segundos:
+#   servidor − local, medido a cada contato) · problems.tsv (letra \t problem_id \t nome —
+#   o mapa que o submit OFFLINE usa sem rede) · outbox/*.pkt (fila) · chainhead (sha do último)
+_cdir(){ printf '%s/comp-%s' "$CFG" "$CONTEST"; }
+need_contest(){ [[ "$CONTEST_SET" == 1 && "$CONTEST" != treino ]] || die "informe o contest: -c <id> (ou faça moj-comp login <id>)"; }
+qc(){ printf '?contest=%s' "$(enc "$CONTEST")"; }
+
+# relógio: epoch é UTC por definição; o offset corrige relógio LOCAL errado (sem root).
+_offset(){ cat "$(_cdir)/offset" 2>/dev/null || echo 0; }
+_now_utc(){ local o; o="$(_offset)"; [[ "$o" =~ ^-?[0-9]+$ ]] || o=0; echo $(( ${MOJ_FAKE_LOCAL_EPOCH:-$(date +%s)} + o )); }
+
+# _api_net METHOD PATH [json] — como api(), mas SEPARA rede de HTTP: rc 0 = 2xx (corpo no
+# stdout); rc 22 = erro HTTP (mensagem no stderr); rc 7 = SEM REDE (curl falhou/000).
+_api_net(){
+  local m="$1" p="$2" data="${3:-}" auth=() code tmp hf out
+  tmp="$(mktemp)"; hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
+  if [[ -n "$data" ]]; then
+    code="$(printf '%s' "$data" | curl -sS --max-time 8 -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" -H 'Content-Type: application/json' --data-binary @- "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
+  else
+    code="$(curl -sS --max-time 8 -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
+  fi
+  out="$(cat "$tmp")"; rm -f "$tmp"
+  if [[ -z "$code" || "$code" == 000 ]]; then return 7; fi
+  if [[ "$code" =~ ^2 ]]; then printf '%s' "$out"; return 0; fi
+  printf '%s: HTTP %s: %s\n' "$MOJ_TOOL" "$code" "$(jq -r '.error.message // .' 2>/dev/null <<<"$out" | head -1)" >&2
+  return 22
+}
+
+# _anchor [resp-json] — re-ancora beacon + offset a partir de uma resposta com server_utc/
+# beacon, ou buscando GET /contest/beacon. Silencioso; sem rede, mantém o que tem.
+_anchor(){
+  local r="${1:-}" t0 t1 st b
+  if [[ -z "$r" ]]; then
+    t0="${MOJ_FAKE_LOCAL_EPOCH:-$(date +%s)}"
+    r="$(_api_net GET "/contest/beacon$(qc)")" || return 0
+    t1="${MOJ_FAKE_LOCAL_EPOCH:-$(date +%s)}"
+  else t0="${MOJ_FAKE_LOCAL_EPOCH:-$(date +%s)}"; t1="$t0"; fi
+  st="$(jq -r '.server_utc // empty' <<<"$r")"; b="$(jq -r '.beacon // empty' <<<"$r")"
+  mkdir -p "$(_cdir)" 2>/dev/null
+  [[ "$st" =~ ^[0-9]+$ ]] && echo $(( st - (t0 + t1) / 2 )) > "$(_cdir)/offset"
+  [[ -n "$b" ]] && printf '%s' "$b" > "$(_cdir)/beacon"
+  return 0
+}
+
+_clock_warn(){ local o; o="$(_offset)"
+  [[ "$o" =~ ^-?[0-9]+$ ]] || return 0
+  local a=$(( o < 0 ? -o : o ))
+  (( a > 3 )) && echo "⚠ seu relógio está ${a}s $( ((o>0)) && echo atrasado || echo adiantado ) — os carimbos usam a hora do SERVIDOR (corrigida), não se preocupe; mas confira com: $MOJ_TOOL time" >&2
+  return 0
+}
+
+# ---- sessão -------------------------------------------------------------------------------
+cmd_login(){ local cid="${1:-}" u=""
+  [[ -n "$cid" ]] || die "uso: $MOJ_TOOL login <cid|url> [-u login]"
+  shift || true
+  while [[ $# -gt 0 ]]; do case "$1" in -u|--user) u="$2"; shift 2;; *) die "opção desconhecida: $1";; esac; done
+  # aceita a URL da prova: https://<cid>.moj... ou .../contest/?c=<cid>
+  if [[ "$cid" == http*://* ]]; then
+    local h q; q="${cid##*c=}"; h="${cid#*://}"; h="${h%%/*}"; h="${h%%.*}"
+    if [[ "$cid" == *"c="* ]]; then cid="${q%%&*}"; else cid="$h"; fi
+  fi
+  CONTEST="$cid"; CONTEST_SET=1
+  [[ -n "$u" ]] || read -rp "login ($cid): " u
+  local p; read -rsp "senha: " p; echo
+  local t0 r; t0="$(date +%s)"
+  r="$(api POST "/auth/login?contest=$(enc "$cid")" "$(jq -n --arg u "$u" --arg p "$p" '{username:$u,password:$p}')")"
+  local tok; tok="$(jq -r '.token // empty' <<<"$r")"
+  [[ -n "$tok" ]] || die "login falhou."
+  printf '%s' "$tok" | token_save "$cid"
+  mkdir -p "$(_cdir)/outbox" 2>/dev/null; chmod 700 "$(_cdir)" 2>/dev/null
+  jq -r '.offline_pubkey_pem // empty' <<<"$r" > "$(_cdir)/pub.pem"
+  _anchor "$r"
+  echo "ok, logado em '$cid' como $u."
+  if [[ -s "$(_cdir)/pub.pem" ]]; then
+    echo "· modo offline ARMADO (chave do contest recebida; relógio desvio $(_offset)s)."
+  else
+    echo "· ⚠ servidor sem kit offline (versão antiga?) — submissões só com rede."
+  fi
+  _clock_warn
+  _load_problems >/dev/null 2>&1 || true
+  echo "próximo passo: '$MOJ_TOOL fetch' baixa os enunciados p/ ler mesmo sem rede."; }
+cmd_logout(){ need_contest; token_drop "$CONTEST"; echo "deslogado de '$CONTEST'."; }
+cmd_whoami(){ need_contest; need_login
+  api GET "/auth/status$(qc)" | out '"contest: '"$CONTEST"'  login: \(.login//"?")  nome: \(.name//"?")"'; }
+cmd_time(){ need_contest
+  local t0 t1 r st loc
+  t0="$(date +%s)"; r="$(_api_net GET "/contest/basic$(qc)")" || { echo "sem rede AGORA — último desvio conhecido: $(_offset)s (carimbos offline já saem corrigidos)"; return 0; }
+  _anchor >/dev/null 2>&1 || true
+  t1="$(date +%s)"; loc=$(( (t0+t1)/2 ))
+  st="$(_offset)"
+  echo "relógio local (UTC): $(date -u -d "@$loc" +%H:%M:%S 2>/dev/null || date -u -r "$loc" +%H:%M:%S)"
+  echo "desvio p/ o servidor: ${st}s $( [[ "${st#-}" =~ ^[0-3]$ ]] && echo '(ok)' || echo '(⚠ grande — carimbos usam a hora corrigida)' )"; }
+
+# ---- problemas / enunciados ----------------------------------------------------------------
+_load_problems(){ # atualiza o mapa local letra→id (o submit OFFLINE depende dele)
+  local r; r="$(_api_net GET "/contest/problems$(qc)")" || return 1
+  mkdir -p "$(_cdir)" 2>/dev/null
+  jq -r '.problems[]? | [.short_name, .problem_id, .full_name] | @tsv' <<<"$r" > "$(_cdir)/problems.tsv" 2>/dev/null
+  printf '%s' "$r"
+}
+_letter2id(){ awk -F'\t' -v l="$1" 'toupper($1)==toupper(l){print $2; exit}' "$(_cdir)/problems.tsv" 2>/dev/null; }
+cmd_problems(){ need_contest; need_login
+  local r; r="$(_load_problems)" || die "sem rede — use os enunciados do '$MOJ_TOOL fetch' e o '$MOJ_TOOL monitor' p/ enviar."
+  _anchor >/dev/null 2>&1 &
+  jq -r '.problems[]? | "\(.short_name)  \(.full_name)\(if .time_limits then "   [TL " + ([.time_limits[]?|tostring]|join("/")) + "s]" else "" end)"' <<<"$r"; wait; }
+cmd_fetch(){ need_contest; need_login
+  local d="./${CONTEST}-prova" r n=0
+  r="$(_load_problems)" || die "sem rede — não deu p/ baixar agora."
+  mkdir -p "$d"
+  while IFS=$'\t' read -r letter pid name; do
+    local base="$d/${letter}"
+    jq -r --arg l "$letter" '.problems[] | select(.short_name==$l) | .statement_html_b64 // empty' <<<"$r" | base64 -d > "$base.html" 2>/dev/null
+    [[ -s "$base.html" ]] || rm -f "$base.html"
+    jq -r --arg l "$letter" '.problems[] | select(.short_name==$l) | .statement_pdf_b64 // empty' <<<"$r" | base64 -d > "$base.pdf" 2>/dev/null
+    [[ -s "$base.pdf" ]] || rm -f "$base.pdf"
+    n=$((n+1))
+  done < "$(_cdir)/problems.tsv"
+  jq -r '.problems[]? | "\(.short_name)\t\(.full_name)"' <<<"$r" > "$d/problemas.txt"
+  _anchor >/dev/null 2>&1 || true
+  echo "kit da prova em $d/ ($n problema(s), enunciados html/pdf) — dá p/ ler SEM rede."; }
+
+# ---- submissão ----------------------------------------------------------------------------
+_pkg_offline(){ # <letra> <arquivo> — cifra e enfileira; ecoa o caminho do pacote
+  local letter="$1" file="$2" pid pub inner key iv ct wk pkt claimed prev seq out
+  pub="$(_cdir)/pub.pem"
+  [[ -s "$pub" ]] || die "sem a chave do contest (relogue com rede ao menos uma vez) — offline indisponível."
+  pid="$(_letter2id "$letter")"
+  [[ -n "$pid" ]] || die "não sei o problema da letra '$letter' sem rede — rode '$MOJ_TOOL problems' (ou fetch) quando tiver rede; o mapa fica guardado."
+  claimed="$(_now_utc)"
+  prev="$(cat "$(_cdir)/chainhead" 2>/dev/null || true)"
+  local b64f; b64f="$(mktemp)"; _b64file "$file" > "$b64f"
+  inner="$(jq -cn --arg c "$CONTEST" --arg l "$(_session_login)" --arg p "$pid" \
+      --arg f "$(basename "$file")" --rawfile b "$b64f" \
+      --argjson t "$claimed" --arg bc "$(cat "$(_cdir)/beacon" 2>/dev/null || true)" --arg ps "$prev" \
+      '{v:1, c:$c, l:$l, problem_id:$p, filename:$f, code_b64:$b, claimed_utc:$t, beacon:$bc, prev_sha256:$ps}')"
+  rm -f "$b64f"
+  key="$(openssl rand -hex 32)"; iv="$(openssl rand -hex 16)"
+  ct="$(printf '%s' "$inner" | openssl enc -aes-256-cbc -K "$key" -iv "$iv" | base64 | tr -d '\n')"
+  # o sha do conteúdo vai DENTRO do envelope RSA — integridade (CBC puro é maleável)
+  wk="$(printf '%s:%s:%s' "$key" "$iv" "$(printf '%s' "$inner" | _sha256)" \
+        | openssl pkeyutl -encrypt -pubin -inkey "$pub" -pkeyopt rsa_padding_mode:oaep | base64 | tr -d '\n')"
+  pkt="$(jq -cn --arg wk "$wk" --arg ct "$ct" '{v:1, wk:$wk, ct:$ct}')"
+  seq="$(ls "$(_cdir)/outbox" 2>/dev/null | wc -l)"
+  out="$(_cdir)/outbox/$claimed-$(printf '%03d' "$seq").pkt"
+  printf '%s' "$pkt" > "$out"
+  printf '%s' "$pkt" | _sha256 > "$(_cdir)/chainhead"
+  printf '%s' "$out"
+}
+_session_login(){ # o login desta sessão (guardado no login p/ uso offline)
+  local f="$(_cdir)/login"; [[ -s "$f" ]] && { cat "$f"; return; }
+  local l; l="$(_api_net GET "/auth/status$(qc)" 2>/dev/null | jq -r '.login // empty')" || true
+  [[ -n "$l" ]] && { mkdir -p "$(_cdir)"; printf '%s' "$l" | tee "$f"; return; }
+  die "não sei seu login sem rede (relogue com rede uma vez)"; }
+_watch_verdict(){ # <id> — polling do history até sair de provisório (~90s)
+  local id="$1" i line v
+  for (( i=0; i<30; i++ )); do
+    line="$(_api_net GET "/contest/history$(qc)" 2>/dev/null | grep ":$id\$" | tail -1)" || line=""
+    v="$(cut -d: -f5 <<<"$line")"
+    case "$v" in ""|"Not Answered Yet"|"On queue"|"on queue"|"Running"|"running") sleep 3;;
+      *) echo "veredicto: $v"; return 0;; esac
+  done
+  echo "(veredicto ainda não saiu — acompanhe com '$MOJ_TOOL subs')"; }
+cmd_submit(){ need_contest; need_login
+  local force=0 letter="" file="" a
+  for a in "$@"; do case "$a" in
+    --offline) force=1;;
+    --*) die "opção desconhecida: $a (uso: $MOJ_TOOL submit <letra> <arquivo> [--offline])";;
+    *) if [[ -z "$letter" ]]; then letter="$a"; else file="$a"; fi;;
+  esac; done
+  [[ -n "$letter" && -f "$file" ]] || die "uso: $MOJ_TOOL submit <letra> <arquivo>"
+  cmd_sync --quiet || true       # fila pendente tenta ir na frente (ordem preservada)
+  if [[ $force -eq 0 ]]; then
+    local pid r rc=0
+    pid="$(_letter2id "$letter")"
+    if [[ -z "$pid" ]]; then _load_problems >/dev/null 2>&1 || true; pid="$(_letter2id "$letter")"; fi
+    [[ -n "$pid" ]] || die "letra '$letter' não encontrada (veja: $MOJ_TOOL problems)"
+    local b64f body; b64f="$(mktemp)"; _b64file "$file" > "$b64f"
+    body="$(jq -cn --arg p "$pid" --arg f "$(basename "$file")" --rawfile b "$b64f" \
+        '{problem_id:$p, filename:$f, code_b64:$b, source:"file"}')"
+    rm -f "$b64f"
+    r="$(_api_net POST "/submit$(qc)" "$body")" && rc=0 || rc=$?
+    if [[ $rc -eq 0 ]]; then
+      _anchor >/dev/null 2>&1 || true
+      local id; id="$(jq -r '.submission_id // empty' <<<"$r")"
+      echo "enviada ($letter, $(basename "$file")) — id $id. aguardando veredicto…"
+      _watch_verdict "$id"; return $?
+    elif [[ $rc -eq 22 ]]; then
+      return 1                      # erro HTTP real (fora da janela, letra errada…): NÃO vira offline
+    fi
+    echo "⚠ SEM REDE — ativando o modo emergencial." >&2
+  fi
+  local out; out="$(_pkg_offline "$letter" "$file")"
+  _clock_warn
+  echo "submissão EMPACOTADA offline: $letter, $(basename "$file"), carimbo UTC $(date -u -d "@$(basename "$out" | cut -d- -f1)" +%H:%M:%S 2>/dev/null || basename "$out")."
+  echo "ela vale NO HORÁRIO DO CARIMBO quando a rede voltar. Deixe rodando: $MOJ_TOOL monitor"; }
+cmd_subs(){ need_contest; need_login
+  local r; r="$(_api_net GET "/contest/history$(qc)")" || die "sem rede — a fila offline aparece em: $MOJ_TOOL outbox"
+  _anchor >/dev/null 2>&1 || true
+  # 7 campos: tempo:username:problemid:lang:verdict:epoch:subid — verdict pode ter ':'
+  local line ep v rest
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ep="$(awk -F: '{print $(NF-1)}' <<<"$line")"
+    v="$(awk -F: '{v=$5; for(i=6;i<=NF-2;i++) v=v":"$i; print v}' <<<"$line")"
+    rest="$(awk -F: '{printf "%-14s %-5s", $3, $4}' <<<"$line")"
+    printf '%s  %s %s\n' "$(_fmt_epoch "$ep" +%H:%M:%S)" "$rest" "$v"
+  done <<<"$r"; }
+cmd_score(){ need_contest; local r
+  r="$(_api_net GET "/contest/score$(qc)")" || die "sem rede."
+  _anchor >/dev/null 2>&1 & tail -n +2 <<<"$r"; wait; }
+cmd_news(){ need_contest; need_login
+  api GET "/contest/news$(qc)" | jq -r '.news[]? | "— \(.title // "")\n\(.text // .body // "")\n"'; }
+cmd_clar(){ need_contest; need_login
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls) api GET "/contest/clarifications$(qc)" | jq -r '.clarifications[]? | "[\(.problem // "geral")] \(.question)\n  ↳ \(.answer // "(sem resposta ainda)")\n"';;
+    ask) local prob="${1:-}"; shift || true; local q="$*"
+         [[ -n "$prob" && -n "$q" ]] || die "uso: $MOJ_TOOL clar ask <letra|geral> <pergunta>"
+         [[ "$prob" == geral ]] && prob=general
+         api POST "/contest/clarification-ask$(qc)" "$(jq -cn --arg p "$prob" --arg q "$q" '{problem:$p, question:$q}')" >/dev/null
+         echo "pergunta enviada — acompanhe com: $MOJ_TOOL clar ls";;
+    *) die "uso: $MOJ_TOOL clar ls | ask <letra|geral> <pergunta>";;
+  esac; }
+
+# ---- fila offline -------------------------------------------------------------------------
+cmd_outbox(){ need_contest
+  local d="$(_cdir)/outbox" f n=0 now
+  now="$(_now_utc)"
+  shopt -s nullglob
+  for f in "$d"/*.pkt; do
+    n=$((n+1)); local cl; cl="$(basename "$f" | cut -d- -f1)"
+    printf '  %s  carimbo %s (há %dmin)\n' "$(basename "$f")" \
+      "$(date -u -d "@$cl" +%H:%M:%S 2>/dev/null || echo "$cl")" $(( (now-cl)/60 ))
+  done; shopt -u nullglob
+  (( n == 0 )) && echo "fila offline vazia." || echo "$n pacote(s) esperando rede — envie com: $MOJ_TOOL sync (ou deixe o monitor cuidar)"; }
+cmd_sync(){ need_contest
+  local quiet=0; [[ "${1:-}" == --quiet ]] && quiet=1
+  local d="$(_cdir)/outbox" f files=()
+  shopt -s nullglob; for f in "$d"/*.pkt; do files+=("$f"); done; shopt -u nullglob
+  (( ${#files[@]} > 0 )) || { (( quiet )) || echo "fila offline vazia."; return 0; }
+  # corpo montado por ARQUIVO (jq -Rs por pacote -> slurp) — nada de JSON grande por argv
+  local tl body; tl="$(mktemp)"
+  for f in "${files[@]}"; do jq -Rs . "$f" >> "$tl"; done
+  body="$(jq -cs '{packets:.}' "$tl")"; rm -f "$tl"
+  local r rc=0
+  r="$(_api_net POST "/contest/offline-submit$(qc)" "$body")" && rc=0 || rc=$?
+  if [[ $rc -eq 7 ]]; then (( quiet )) || echo "ainda sem rede (${#files[@]} na fila)."; return 7; fi
+  [[ $rc -ne 0 ]] && return 1
+  _anchor >/dev/null 2>&1 || true
+  mkdir -p "$d/enviados" "$d/rejeitados" 2>/dev/null
+  local i=0 st ids=()
+  for f in "${files[@]}"; do
+    st="$(jq -r --argjson i "$i" '.results[$i].status // "?"' <<<"$r")"
+    case "$st" in
+      accepted) local id cl; id="$(jq -r --argjson i "$i" '.results[$i].submission_id' <<<"$r")"
+                cl="$(jq -r --argjson i "$i" '.results[$i].counted_at' <<<"$r")"; ids+=("$id")
+                echo "✓ $(basename "$f") ACEITA — contabilizada às $(date -u -d "@$cl" +%H:%M:%S 2>/dev/null || echo "$cl") UTC (id $id)"
+                mv -f "$f" "$d/enviados/";;
+      duplicate) echo "· $(basename "$f") já tinha sido aceita antes (duplicata) — ok"; mv -f "$f" "$d/enviados/";;
+      *) local why; why="$(jq -r --argjson i "$i" '.results[$i].reason // "?"' <<<"$r")"
+         echo "✗ $(basename "$f") REJEITADA: $why  (guardada em rejeitados/ — mostre à organização)"
+         mv -f "$f" "$d/rejeitados/";;
+    esac; i=$((i+1))
+  done
+  (( ${#ids[@]} > 0 )) && (( quiet == 0 )) && { echo "aguardando veredicto(s)…"; local id; for id in "${ids[@]}"; do _watch_verdict "$id"; done; }
+  return 0; }
+cmd_monitor(){ need_contest
+  echo "monitor da fila offline — Ctrl-C sai. Tentando reenviar a cada 15s…"
+  local n r online f
+  while :; do
+    shopt -s nullglob; local files=("$(_cdir)/outbox"/*.pkt); shopt -u nullglob
+    n=0; for f in "${files[@]}"; do [[ -e "$f" ]] && n=$((n+1)); done
+    online=OFFLINE
+    if r="$(_api_net GET "/contest/basic$(qc)" 2>/dev/null)"; then online=ONLINE; _anchor >/dev/null 2>&1 || true; fi
+    printf '\n[%s] rede: %s · fila: %d pacote(s)\n' "$(date -u -d "@$(_now_utc)" +%H:%M:%S 2>/dev/null || date +%T)" "$online" "$n"
+    if (( n > 0 )); then cmd_outbox | sed 's/^/  /'; fi
+    if [[ "$online" == ONLINE ]]; then
+      if (( n > 0 )); then cmd_sync || true
+      else echo "  fila vazia e rede OK — tudo em dia. (Ctrl-C p/ sair; sigo vigiando)"; fi
+    fi
+    sleep 15
+  done; }
+
+cmd_doctor(){ local bad=0 srv
+  echo "$MOJ_TOOL doctor — diagnóstico"
+  echo "· build local: $MOJ_CLI_BUILD"
+  srv="$(_server_build)"
+  [[ -n "$srv" && "$MOJ_CLI_BUILD" != dev && "$MOJ_CLI_BUILD" != "$srv" ]] \
+    && { echo "✗ DESATUALIZADO (servidor: $srv) — rode: $MOJ_TOOL update"; bad=1; } \
+    || echo "✓ build $( [[ -n "$srv" ]] && echo "ok (servidor: $srv)" || echo "$MOJ_CLI_BUILD (servidor indisponível)")"
+  have jq || { echo "✗ jq AUSENTE"; bad=1; }
+  have curl || { echo "✗ curl AUSENTE"; bad=1; }
+  if have openssl; then echo "✓ openssl $(openssl version 2>/dev/null | awk '{print $2}') — modo offline disponível"
+  else echo "✗ openssl AUSENTE — o modo offline (queda de Internet) NÃO funciona"; bad=1; fi
+  if [[ "$CONTEST_SET" == 1 && -f "$(token_file)" ]]; then echo "✓ sessão: $CONTEST"
+  else echo "· sessão: nenhuma (rode: $MOJ_TOOL login <cid>)"; fi
+  [[ "$CONTEST_SET" == 1 && -s "$(_cdir)/pub.pem" ]] && echo "✓ chave offline do contest guardada (desvio de relógio: $(_offset)s)"
+  (( bad == 0 )) && echo "tudo certo." || echo "há itens ✗ acima."
+  return $bad; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
+  time|relogio) cmd_time "$@";;
+  fetch|baixar) cmd_fetch "$@";;
+  problems|problemas) cmd_problems "$@";;
+  submit|enviar) cmd_submit "$@";;
+  subs|status) cmd_subs "$@";;
+  score|placar) cmd_score "$@";;
+  news|noticias) cmd_news "$@";;
+  clar|clarification) cmd_clar "$@";;
+  outbox|fila) cmd_outbox "$@";;
+  sync|reenviar) cmd_sync "$@";;
+  monitor) cmd_monitor "$@";;
+  doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update) cmd_update "$@";;
+  help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//';;
+  *) die "comando desconhecido: $cmd (veja '$MOJ_TOOL help')";;
+esac

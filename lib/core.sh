@@ -61,6 +61,34 @@ mojtools_dir(){
   die "mojtools não encontrado — só é preciso p/ checker/interactive/test --run: git clone https://github.com/cd-moj/mojtools ~/moj/mojtools (ou exporte MOJTOOLS_DIR). Diagnóstico: $MOJ_TOOL doctor"
 }
 
+# ---- versão / auto-atualização (comuns a TODAS as camadas: moj, moj-contest, moj-judges,
+# moj-comp). O carimbo MOJ_CLI_BUILD (topo) casa com o /moj.build servido; cmd_update baixa
+# os artefatos servidos e troca no lugar (usa $0 — vale no repo E no artefato inlined).
+_server_build(){ curl -fsS --max-time 3 "${HDR[@]}" "$MOJ_URL/moj.build" 2>/dev/null | head -1 || true; }
+cmd_version(){ local srv
+  echo "$MOJ_TOOL build: $MOJ_CLI_BUILD"
+  srv="$(_server_build)"
+  if [[ -n "$srv" ]]; then
+    echo "servidor ($MOJ_URL): build $srv"
+    [[ "$MOJ_CLI_BUILD" == dev || "$MOJ_CLI_BUILD" == "$srv" ]] || echo "  ⚠ DESATUALIZADO — rode: $MOJ_TOOL update"
+  else
+    echo "servidor ($MOJ_URL): build indisponível"
+  fi }
+cmd_update(){ local self dir t dst tmp new nup=0 old="$MOJ_CLI_BUILD"
+  self="$(readlink -f "$(_abspath "$0")" 2>/dev/null || _abspath "$0")"
+  dir="$(dirname "$self")"
+  for t in moj moj-contest moj-judges moj-comp; do
+    dst="$dir/$t"
+    [[ "$t" == "${self##*/}" || -f "$dst" ]] || continue     # o próprio + as camadas presentes
+    tmp="$(mktemp "$dst.new.XXXXXX" 2>/dev/null)" || die "sem permissão de escrita em $dir — rode: sudo $MOJ_TOOL update"
+    curl -fsS --max-time 60 "${HDR[@]}" -o "$tmp" "$MOJ_URL/$t" || { rm -f "$tmp"; die "download falhou: $MOJ_URL/$t"; }
+    bash -n "$tmp" 2>/dev/null || { rm -f "$tmp"; die "artefato baixado inválido ($t) — nada foi trocado"; }
+    chmod +x "$tmp"; mv -f "$tmp" "$dst"
+    nup=$((nup+1))
+  done
+  new="$(grep -m1 '^MOJ_CLI_BUILD=' "$dir/${self##*/}" 2>/dev/null | cut -d'"' -f2)"
+  echo "atualizado: $nup artefato(s) em $dir (build $old -> ${new:-?})"; }
+
 # token_file [contest] -> caminho do token daquela sessão (não cria nada)
 # (local a=x b=$a NÃO funciona com set -u: o `local` expande os argumentos antes de atribuir)
 token_file(){ local c f; c="${1:-$CONTEST}"; f="$CFG/token-$c"

@@ -12,7 +12,7 @@ mkdir -p dist
 # dist/moj.build p/ web/moj.build junto com os artefatos.
 BUILD="$(git log -1 --format='%h-%cd' --date=format:%Y%m%d 2>/dev/null || true)"
 [[ -n "$BUILD" ]] || BUILD="nogit-$(date +%Y%m%d)"
-for tool in moj moj-contest moj-judges; do
+for tool in moj moj-contest moj-judges moj-comp; do
   [[ -f "$tool" ]] || { echo "mkdist: pulando $tool (não existe)"; continue; }
   grep -q '^# @INLINE-BEGIN' "$tool" || { echo "mkdist: $tool sem marcador @INLINE-BEGIN" >&2; exit 1; }
   awk 'BEGIN{skip=0}
