@@ -467,7 +467,9 @@ cmd_test(){ local d="." run=0 sol="" a
     [[ "$v" == "$wdir" ]] && v=""                       # stdout de 1 linha = morreu sem veredicto
     printf '  %s -> %s\n' "$(basename "$s")" "${v:-?}"
     if [[ -d "$wdir" && -f "$wdir/run-trace.log" ]]; then
-      times="$(awk '$1=="EXECTIME"{n++; printf " %s%s",$3,($4=="AC"?"":"("$4")"); if($3+0>w)w=$3+0}
+      # LC_ALL=C obrigatório: na máquina do USUÁRIO o awk (mawk no Ubuntu) honra o locale —
+      # sob pt_BR, "0.21"+0 vira 0 (strtod espera vírgula) e %.2f imprime vírgula ("pior 0,00s")
+      times="$(LC_ALL=C awk '$1=="EXECTIME"{n++; printf " %s%s",$3,($4=="AC"?"":"("$4")"); if($3+0>w)w=$3+0}
                     END{if(n)printf "\n    %d teste(s), pior %.2fs",n,w}' "$wdir/run-trace.log")"
       tlused="$(grep -m1 '^TL_LANG=' "$wdir/report.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"")"
       [[ -n "$times" ]] && printf '    tempos%s:%s\n' "${tlused:+ (TL ${tlused}s)}" "$times"

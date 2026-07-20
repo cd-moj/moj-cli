@@ -44,6 +44,10 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - **`moj test --run` só se testa DE VERDADE em máquina com bwrap REAL** (o dev tem fbwrap e morre
   antes do caminho de julgamento — use o juiz de produção como bancada: copie o pacote + mojtools
   p/ ~ribas e rode com `CAGE_ROOT` apontando p/ a rootfs).
+- Pegadinha de LOCALE: a CLI roda na máquina do USUÁRIO — awk numérico SEM `LC_ALL=C` quebra em
+  pt_BR: no mawk (o awk default do Ubuntu) `"0.21"+0 == 0` (strtod espera vírgula) e `%f` imprime
+  vírgula (foi o "pior 0,00s" do relato do Edson; gawk não reproduz — ignora locale sem
+  --use-lc-numeric). TODO awk/printf de número com ponto leva `LC_ALL=C` na frente.
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
 - **Doc junto com o código** (doc atrasada = bug): mudou subcomando/contrato? atualize o `README.md`, o
   cabeçalho de `moj` e `cdmoj/docs/API.md` (+ `openapi.json`) no mesmo commit.
