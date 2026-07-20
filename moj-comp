@@ -42,6 +42,10 @@ while [[ $# -gt 0 ]]; do
     *) break;;
   esac
 done
+# aluno não digita -c toda hora: o login GRAVA a última prova e ela vira o default
+if [[ "$CONTEST_SET" == 0 && -s "$CFG/comp-last" ]]; then
+  CONTEST="$(cat "$CFG/comp-last")"; CONTEST_SET=1
+fi
 
 # estado local da sessão de prova: ~/.config/moj/comp-<cid>/
 #   pub.pem (chave pública do contest) · beacon (último beacon assinado) · offset (segundos:
@@ -113,7 +117,9 @@ cmd_login(){ local cid="${1:-}" u=""
   local tok; tok="$(jq -r '.token // empty' <<<"$r")"
   [[ -n "$tok" ]] || die "login falhou."
   printf '%s' "$tok" | token_save "$cid"
+  mkdir -p "$CFG" 2>/dev/null; printf '%s' "$cid" > "$CFG/comp-last"
   mkdir -p "$(_cdir)/outbox" 2>/dev/null; chmod 700 "$(_cdir)" 2>/dev/null
+  printf '%s' "$u" > "$(_cdir)/login"
   jq -r '.offline_pubkey_pem // empty' <<<"$r" > "$(_cdir)/pub.pem"
   _anchor "$r"
   echo "ok, logado em '$cid' como $u."
@@ -186,7 +192,7 @@ _pkg_offline(){ # <letra> <arquivo> — cifra e enfileira; ecoa o caminho do pac
   wk="$(printf '%s:%s:%s' "$key" "$iv" "$(printf '%s' "$inner" | _sha256)" \
         | openssl pkeyutl -encrypt -pubin -inkey "$pub" -pkeyopt rsa_padding_mode:oaep | base64 | tr -d '\n')"
   pkt="$(jq -cn --arg wk "$wk" --arg ct "$ct" '{v:1, wk:$wk, ct:$ct}')"
-  seq="$(ls "$(_cdir)/outbox" 2>/dev/null | wc -l)"
+  seq="$(find "$(_cdir)/outbox" -maxdepth 1 -name '*.pkt' 2>/dev/null | wc -l)"
   out="$(_cdir)/outbox/$claimed-$(printf '%03d' "$seq").pkt"
   printf '%s' "$pkt" > "$out"
   printf '%s' "$pkt" | _sha256 > "$(_cdir)/chainhead"
