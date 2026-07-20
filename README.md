@@ -144,6 +144,10 @@ do relógio; `moj-comp monitor` fica vigiando, reenvia sozinho quando a rede vol
 beacon assinado do servidor + a chegada — ver `cdmoj/docs/FLOW.md` §7½). Guia do competidor:
 `/contest/cli.html` no servidor. Requisitos: bash, curl, jq, **openssl**.
 
+A mesma CLI atende o **treino livre** (subconjunto, sem modo offline): `moj-comp login treino`
+(conta do site) + `problems <busca>` · `statement <org#slug>` · `submit <org#slug> <arquivo>`
+(espera o veredicto) · `subs`. Guia do treino: `/treino/cli.html`.
+
 ## Gestão de contest (`moj-contest` / `moj contest …`)
 
 CLI da camada de **contest** — cria, reaproveita e administra contests pela API (os mesmos

@@ -16,6 +16,8 @@
 #   moj-comp monitor                      (DEIXE RODANDO na queda: mostra a fila, reenvia
 #                                          sozinho e acompanha os veredictos quando voltar)
 #   moj-comp version | update | doctor
+# TREINO LIVRE (mesma CLI, subconjunto): moj-comp login treino (sua conta do site);
+#   problems <busca> · statement <org#slug> · submit <org#slug> <arquivo> · subs
 # Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_CONTEST (= -c). Requisitos:
 # bash, curl, jq, openssl. Sem root, sem instalação: um arquivo.
 # @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
@@ -52,7 +54,10 @@ fi
 #   servidor − local, medido a cada contato) · problems.tsv (letra \t problem_id \t nome —
 #   o mapa que o submit OFFLINE usa sem rede) · outbox/*.pkt (fila) · chainhead (sha do último)
 _cdir(){ printf '%s/comp-%s' "$CFG" "$CONTEST"; }
-need_contest(){ [[ "$CONTEST_SET" == 1 && "$CONTEST" != treino ]] || die "informe o contest: -c <id> (ou faça moj-comp login <id>)"; }
+need_contest(){ [[ "$CONTEST_SET" == 1 ]] || die "informe onde você está: 'moj-comp login <cid>' (contest) ou 'moj-comp login treino' (treino livre)"; }
+# TREINO LIVRE: a mesma CLI, subconjunto de operações — problema é o ID (org#slug, não letra),
+# rotas /treino/*, SEM modo offline (você está na Internet aberta; o emergencial é de prova).
+_is_treino(){ [[ "$CONTEST" == treino ]]; }
 qc(){ printf '?contest=%s' "$(enc "$CONTEST")"; }
 
 # relógio: epoch é UTC por definição; o offset corrige relógio LOCAL errado (sem root).
@@ -123,6 +128,10 @@ cmd_login(){ local cid="${1:-}" u=""
   jq -r '.offline_pubkey_pem // empty' <<<"$r" > "$(_cdir)/pub.pem"
   _anchor "$r"
   echo "ok, logado em '$cid' como $u."
+  if _is_treino; then
+    echo "próximo passo: '$MOJ_TOOL problems <busca>' acha um problema; '$MOJ_TOOL statement <id>' baixa o enunciado."
+    return 0
+  fi
   if [[ -s "$(_cdir)/pub.pem" ]]; then
     echo "· modo offline ARMADO (chave do contest recebida; relógio desvio $(_offset)s)."
   else
@@ -136,8 +145,8 @@ cmd_whoami(){ need_contest; need_login
   api GET "/auth/status$(qc)" | out '"contest: '"$CONTEST"'  login: \(.login//"?")  nome: \(.name//"?")"'; }
 cmd_time(){ need_contest
   local t0 t1 r st loc
-  t0="$(date +%s)"; r="$(_api_net GET "/contest/basic$(qc)")" || { echo "sem rede AGORA — último desvio conhecido: $(_offset)s (carimbos offline já saem corrigidos)"; return 0; }
-  _anchor >/dev/null 2>&1 || true
+  t0="$(date +%s)"; r="$(_api_net GET "/auth/status$(qc)")" || { echo "sem rede AGORA — último desvio conhecido: $(_offset)s (carimbos offline já saem corrigidos)"; return 0; }
+  _is_treino || _anchor >/dev/null 2>&1 || true
   t1="$(date +%s)"; loc=$(( (t0+t1)/2 ))
   st="$(_offset)"
   echo "relógio local (UTC): $(date -u -d "@$loc" +%H:%M:%S 2>/dev/null || date -u -r "$loc" +%H:%M:%S)"
@@ -151,11 +160,36 @@ _load_problems(){ # atualiza o mapa local letra→id (o submit OFFLINE depende d
   printf '%s' "$r"
 }
 _letter2id(){ awk -F'\t' -v l="$1" 'toupper($1)==toupper(l){print $2; exit}' "$(_cdir)/problems.tsv" 2>/dev/null; }
-cmd_problems(){ need_contest; need_login
+cmd_problems(){ need_contest; local filtro="${1:-}"
+  if _is_treino; then
+    local r; r="$(_api_net GET "/treino/problems")" || die "sem rede."
+    r="$(jq -r '(if type=="object" then .problems else . end)[]? | "\(.id)\t\(.title)\t\(.solved_count // 0) resolveram"' <<<"$r")"
+    if [[ -n "$filtro" ]]; then grep -i -- "$filtro" <<<"$r" || echo "(nada casou com '$filtro')"
+    else printf '%s\n' "$r" | head -40; echo "  … (são muitos: filtre com '$MOJ_TOOL problems <busca>')"; fi
+    return 0
+  fi
+  need_login
   local r; r="$(_load_problems)" || die "sem rede — use os enunciados do '$MOJ_TOOL fetch' e o '$MOJ_TOOL monitor' p/ enviar."
   _anchor >/dev/null 2>&1 &
   jq -r '.problems[]? | "\(.short_name)  \(.full_name)\(if .time_limits then "   [TL " + ([.time_limits[]?|tostring]|join("/")) + "s]" else "" end)"' <<<"$r"; wait; }
-cmd_fetch(){ need_contest; need_login
+# statement <id|letra> — baixa UM enunciado (treino: /treino/problem?id=; contest: do fetch)
+cmd_statement(){ need_contest; local ref="${1:-}"
+  [[ -n "$ref" ]] || die "uso: $MOJ_TOOL statement <id do problema$( _is_treino || echo '|letra')>"
+  if _is_treino; then
+    local r out rc=0
+    r="$(_api_net GET "/treino/problem?id=$(enc "$ref")")" && rc=0 || rc=$?
+    [[ $rc -eq 7 ]] && die "sem rede."
+    [[ $rc -ne 0 ]] && die "problema '$ref' não achado (o id é org#slug — busque com: $MOJ_TOOL problems <busca>)"
+    jq -e '.statement_html_b64 // empty | length > 0' >/dev/null 2>&1 <<<"$r" || die "problema '$ref' sem enunciado servível"
+    out="./${ref##*#}.html"
+    jq -r '.statement_html_b64' <<<"$r" | base64 -d > "$out"
+    echo "enunciado: $out  ($(jq -r '.title // ""' <<<"$r"))  — abra no navegador"
+    return 0
+  fi
+  cmd_fetch >/dev/null
+  echo "enunciado: ./${CONTEST}-prova/${ref}.html (e .pdf se houver)"; }
+_contest_only(){ _is_treino && die "'$1' é de CONTEST — no treino livre use: problems <busca> · statement <id> · submit <id> <arq> · subs"; return 0; }
+cmd_fetch(){ need_contest; _contest_only fetch; need_login
   local d="./${CONTEST}-prova" r n=0
   r="$(_load_problems)" || die "sem rede — não deu p/ baixar agora."
   mkdir -p "$d"
@@ -203,11 +237,17 @@ _session_login(){ # o login desta sessão (guardado no login p/ uso offline)
   local l; l="$(_api_net GET "/auth/status$(qc)" 2>/dev/null | jq -r '.login // empty')" || true
   [[ -n "$l" ]] && { mkdir -p "$(_cdir)"; printf '%s' "$l" | tee "$f"; return; }
   die "não sei seu login sem rede (relogue com rede uma vez)"; }
-_watch_verdict(){ # <id> — polling do history até sair de provisório (~90s)
-  local id="$1" i line v
+_submit_body(){ # <problem_id> <arquivo> — corpo do /submit (código via arquivo, nunca argv)
+  local b64f body; b64f="$(mktemp)"; _b64file "$2" > "$b64f"
+  body="$(jq -cn --arg p "$1" --arg f "$(basename "$2")" --rawfile b "$b64f" \
+      '{problem_id:$p, filename:$f, code_b64:$b, source:"file"}')"
+  rm -f "$b64f"; printf '%s' "$body"; }
+_watch_verdict(){ # <id> [prob-id-treino] — polling do history até sair de provisório (~90s)
+  local id="$1" prob="${2:-}" i line v rota
+  rota="/contest/history$(qc)"; _is_treino && rota="/treino/history?id=$(enc "$prob")"
   for (( i=0; i<30; i++ )); do
-    line="$(_api_net GET "/contest/history$(qc)" 2>/dev/null | grep ":$id\$" | tail -1)" || line=""
-    v="$(cut -d: -f5 <<<"$line")"
+    line="$(_api_net GET "$rota" 2>/dev/null | grep ":$id\$" | tail -1)" || line=""
+    v="$(awk -F: '{v=$5; for(j=6;j<=NF-2;j++) v=v":"$j; print v}' <<<"$line")"
     case "$v" in ""|"Not Answered Yet"|"On queue"|"on queue"|"Running"|"running") sleep 3;;
       *) echo "veredicto: $v"; return 0;; esac
   done
@@ -219,18 +259,23 @@ cmd_submit(){ need_contest; need_login
     --*) die "opção desconhecida: $a (uso: $MOJ_TOOL submit <letra> <arquivo> [--offline])";;
     *) if [[ -z "$letter" ]]; then letter="$a"; else file="$a"; fi;;
   esac; done
-  [[ -n "$letter" && -f "$file" ]] || die "uso: $MOJ_TOOL submit <letra> <arquivo>"
+  [[ -n "$letter" && -f "$file" ]] || die "uso: $MOJ_TOOL submit <$(_is_treino && echo 'id' || echo 'letra')> <arquivo>"
+  if _is_treino; then     # treino: id direto, sem modo offline (você está na Internet aberta)
+    [[ $force -eq 1 ]] && die "o modo offline é de CONTEST — no treino livre envie com rede."
+    local r id
+    r="$(_api_net POST "/submit$(qc)" "$(_submit_body "$letter" "$file")")" \
+      || die "não deu p/ enviar agora (sem rede?) — tente de novo."
+    id="$(jq -r '.submission_id // empty' <<<"$r")"
+    echo "enviada ($letter, $(basename "$file")) — id $id. aguardando veredicto…"
+    _watch_verdict "$id" "$letter"; return $?
+  fi
   cmd_sync --quiet || true       # fila pendente tenta ir na frente (ordem preservada)
   if [[ $force -eq 0 ]]; then
     local pid r rc=0
     pid="$(_letter2id "$letter")"
     if [[ -z "$pid" ]]; then _load_problems >/dev/null 2>&1 || true; pid="$(_letter2id "$letter")"; fi
     [[ -n "$pid" ]] || die "letra '$letter' não encontrada (veja: $MOJ_TOOL problems)"
-    local b64f body; b64f="$(mktemp)"; _b64file "$file" > "$b64f"
-    body="$(jq -cn --arg p "$pid" --arg f "$(basename "$file")" --rawfile b "$b64f" \
-        '{problem_id:$p, filename:$f, code_b64:$b, source:"file"}')"
-    rm -f "$b64f"
-    r="$(_api_net POST "/submit$(qc)" "$body")" && rc=0 || rc=$?
+    r="$(_api_net POST "/submit$(qc)" "$(_submit_body "$pid" "$file")")" && rc=0 || rc=$?
     if [[ $rc -eq 0 ]]; then
       _anchor >/dev/null 2>&1 || true
       local id; id="$(jq -r '.submission_id // empty' <<<"$r")"
@@ -246,8 +291,10 @@ cmd_submit(){ need_contest; need_login
   echo "submissão EMPACOTADA offline: $letter, $(basename "$file"), carimbo UTC $(date -u -d "@$(basename "$out" | cut -d- -f1)" +%H:%M:%S 2>/dev/null || basename "$out")."
   echo "ela vale NO HORÁRIO DO CARIMBO quando a rede voltar. Deixe rodando: $MOJ_TOOL monitor"; }
 cmd_subs(){ need_contest; need_login
-  local r; r="$(_api_net GET "/contest/history$(qc)")" || die "sem rede — a fila offline aparece em: $MOJ_TOOL outbox"
-  _anchor >/dev/null 2>&1 || true
+  local r rota="/contest/history$(qc)"
+  _is_treino && rota="/treino/history-full"
+  r="$(_api_net GET "$rota")" || die "sem rede$(_is_treino || echo " — a fila offline aparece em: $MOJ_TOOL outbox")"
+  _is_treino || _anchor >/dev/null 2>&1 || true
   # 7 campos: tempo:username:problemid:lang:verdict:epoch:subid — verdict pode ter ':'
   local line ep v rest
   while IFS= read -r line; do
@@ -257,12 +304,14 @@ cmd_subs(){ need_contest; need_login
     rest="$(awk -F: '{printf "%-14s %-5s", $3, $4}' <<<"$line")"
     printf '%s  %s %s\n' "$(_fmt_epoch "$ep" +%H:%M:%S)" "$rest" "$v"
   done <<<"$r"; }
-cmd_score(){ need_contest; local r
+cmd_score(){ need_contest
+  _is_treino && die "o treino livre não tem placar — suas estatísticas estão no site (/treino)."
+  local r
   r="$(_api_net GET "/contest/score$(qc)")" || die "sem rede."
   _anchor >/dev/null 2>&1 & tail -n +2 <<<"$r"; wait; }
-cmd_news(){ need_contest; need_login
+cmd_news(){ need_contest; _contest_only news; need_login
   api GET "/contest/news$(qc)" | jq -r '.news[]? | "— \(.title // "")\n\(.text // .body // "")\n"'; }
-cmd_clar(){ need_contest; need_login
+cmd_clar(){ need_contest; _contest_only clar; need_login
   local sub="${1:-ls}"; shift || true
   case "$sub" in
     ls) api GET "/contest/clarifications$(qc)" | jq -r '.clarifications[]? | "[\(.problem // "geral")] \(.question)\n  ↳ \(.answer // "(sem resposta ainda)")\n"';;
@@ -275,7 +324,7 @@ cmd_clar(){ need_contest; need_login
   esac; }
 
 # ---- fila offline -------------------------------------------------------------------------
-cmd_outbox(){ need_contest
+cmd_outbox(){ need_contest; _contest_only outbox
   local d="$(_cdir)/outbox" f n=0 now
   now="$(_now_utc)"
   shopt -s nullglob
@@ -285,7 +334,7 @@ cmd_outbox(){ need_contest
       "$(date -u -d "@$cl" +%H:%M:%S 2>/dev/null || echo "$cl")" $(( (now-cl)/60 ))
   done; shopt -u nullglob
   (( n == 0 )) && echo "fila offline vazia." || echo "$n pacote(s) esperando rede — envie com: $MOJ_TOOL sync (ou deixe o monitor cuidar)"; }
-cmd_sync(){ need_contest
+cmd_sync(){ need_contest; _contest_only sync
   local quiet=0; [[ "${1:-}" == --quiet ]] && quiet=1
   local d="$(_cdir)/outbox" f files=()
   shopt -s nullglob; for f in "$d"/*.pkt; do files+=("$f"); done; shopt -u nullglob
@@ -316,7 +365,7 @@ cmd_sync(){ need_contest
   done
   (( ${#ids[@]} > 0 )) && (( quiet == 0 )) && { echo "aguardando veredicto(s)…"; local id; for id in "${ids[@]}"; do _watch_verdict "$id"; done; }
   return 0; }
-cmd_monitor(){ need_contest
+cmd_monitor(){ need_contest; _contest_only monitor
   echo "monitor da fila offline — Ctrl-C sai. Tentando reenviar a cada 15s…"
   local n r online f
   while :; do
@@ -356,6 +405,7 @@ case "$cmd" in
   time|relogio) cmd_time "$@";;
   fetch|baixar) cmd_fetch "$@";;
   problems|problemas) cmd_problems "$@";;
+  statement|enunciado) cmd_statement "$@";;
   submit|enviar) cmd_submit "$@";;
   subs|status) cmd_subs "$@";;
   score|placar) cmd_score "$@";;
@@ -365,6 +415,6 @@ case "$cmd" in
   sync|reenviar) cmd_sync "$@";;
   monitor) cmd_monitor "$@";;
   doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update) cmd_update "$@";;
-  help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja '$MOJ_TOOL help')";;
 esac
