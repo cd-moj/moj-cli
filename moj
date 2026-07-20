@@ -210,7 +210,10 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
   rm -rf "$T" "${_t:-}"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
-conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; }
+# SEMPRE retorna 0: sem o `return 0` final, o rc do último [[ ]] do laço vazava (chave ausente
+# = rc 1) e QUALQUER atribuição `x="$(conf_get …)"` sob set -e matava o moj MUDO (foi o
+# 'moj test --run' que parava sem nada depois do pré-voo em máquina com bwrap real).
+conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; return 0; }
 conf_set(){ local d="$1" k="$2" v="$3" line found=0 tmp; tmp="$(mktemp)"
   [[ -f "$d/conf" ]] && while IFS= read -r line; do if [[ "$line" == "$k="* ]]; then [[ -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; found=1; else printf '%s\n' "$line" >> "$tmp"; fi; done < "$d/conf"
   [[ $found -eq 0 && -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; mv -f "$tmp" "$d/conf"; }
@@ -448,20 +451,37 @@ cmd_test(){ local d="." run=0 sol="" a
   if [[ -n "$sol" ]]; then sols=("$sol"); else shopt -s nullglob; sols=("$d"/sols/good/*); shopt -u nullglob; fi
   if [[ ${#sols[@]} -eq 0 ]]; then [[ $tltmp -eq 1 ]] && rm -f "$d/tl"; die "nada p/ julgar (sols/good vazio)"; fi
   echo "julgando localmente (mojtools: $mt$( ((tltmp)) && echo "; TL transitório ${ctl}s" ))…"
-  local errf; errf="$(mktemp)"
+  # contrato do build-and-test.sh (o mesmo que o calibreitor usa): stdout = workdir na 1ª linha
+  # + FINALRESP na última; o stderr real vai p/ <workdir>/run-trace.log (exec 2>), com uma linha
+  # "EXECTIME <teste> <tempo> <veredicto>" por teste — é daí que saem os tempos abaixo.
+  local outf errf wdir times tlused sabs dabs
+  outf="$(mktemp)"; errf="$(mktemp)"
+  dabs="$(_abspath "$d")"
   for s in "${sols[@]}"; do
     lang="${s##*.}"
-    v="$( (cd "$mt" && bash build-and-test.sh "$lang" "$(_abspath "$s")" "$(_abspath "$d")" y) 2>"$errf" | tail -n1 )"
+    # resolver ANTES do subshell: "$(_abspath …)" dentro de `( cd "$mt" && … )` expande DEPOIS
+    # do cd — caminho relativo resolvia contra o mojtools e virava "/sol.c" (CE em tudo)
+    sabs="$(_abspath "$s")"
+    ( cd "$mt" && bash build-and-test.sh "$lang" "$sabs" "$dabs" y ) >"$outf" 2>"$errf" || true
+    wdir="$(head -n1 "$outf")"; v="$(tail -n1 "$outf")"
+    [[ "$v" == "$wdir" ]] && v=""                       # stdout de 1 linha = morreu sem veredicto
     printf '  %s -> %s\n' "$(basename "$s")" "${v:-?}"
+    if [[ -d "$wdir" && -f "$wdir/run-trace.log" ]]; then
+      times="$(awk '$1=="EXECTIME"{n++; printf " %s%s",$3,($4=="AC"?"":"("$4")"); if($3+0>w)w=$3+0}
+                    END{if(n)printf "\n    %d teste(s), pior %.2fs",n,w}' "$wdir/run-trace.log")"
+      tlused="$(grep -m1 '^TL_LANG=' "$wdir/report.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"")"
+      [[ -n "$times" ]] && printf '    tempos%s:%s\n' "${tlused:+ (TL ${tlused}s)}" "$times"
+      [[ -s "$wdir/report.html" ]] && printf '    relatório: %s\n' "$wdir/report.html"
+    fi
     if [[ -z "$v" ]]; then   # julgamento mudo = ambiente quebrado, não engolir o porquê
-      { echo "  ⚠ o julgamento não produziu veredicto — últimas linhas do erro:"
-        tail -n 5 "$errf" | sed 's/^/    | /'
+      { echo "  ⚠ o julgamento morreu antes do veredicto — fim do run-trace:"
+        { tail -n 6 "$wdir/run-trace.log" 2>/dev/null || tail -n 6 "$errf"; } | sed 's/^/    | /'
         echo "  (diagnóstico do ambiente: $MOJ_TOOL doctor)"; } >&2
       rc=1
     fi
     if [[ "$s" == */sols/good/* && ! "$v" =~ ^Accepted ]]; then rc=1; fi
   done
-  rm -f "$errf"
+  rm -f "$outf" "$errf"
   [[ $tltmp -eq 1 ]] && rm -f "$d/tl"
   return $rc; }
 # ---- diagnóstico / versão / atualização --------------------------------------------------

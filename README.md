@@ -182,6 +182,17 @@ Com um checkout do [mojtools](https://github.com/cd-moj/mojtools) na máquina (i
   (`mojtools/docs/checker-testlib.md`).
 - `moj interactive <dir> <arbitro.{cpp,py,sh}> [--score]` — instala o driver de **problema
   interativo** (`mojtools/docs/problema-interativo.md`).
+A saída do `--run` mostra, por solução, o veredicto, os tempos POR TESTE medidos na sua máquina
+(como o antigo `make problem`/`make tl`) e o caminho do `report.html` completo:
+
+```
+julgando localmente (mojtools: /home/voce/mojtools; TL transitório 5s)…
+  aula.java -> Accepted,100p. Pontos | 100 |
+    tempos (TL 5s): 0.13 0.12 0.14 …
+    31 teste(s), pior 0.14s
+    relatório: /tmp/tmp.a1B2c3/report.html
+```
+
 - `moj test <dir> --run [sol]` — **julga localmente** com o `build-and-test.sh` (cada `sols/good/*`
   ou uma solução dada; sem `tl` calibrado usa um TL transitório do `CALIBRATIONTL`). Exige **Linux
   com bwrap real** — a jaula é a mesma do juiz. No macOS (sem bwrap) e em hosts com fbwrap (dev),

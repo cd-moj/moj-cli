@@ -37,6 +37,13 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   irmão e copia o que divergir) — mudou a CLI, o próximo deploy embarca.
 - Pegadinha de bash: `local a=x b=$a` NÃO funciona com `set -u` (o `local` expande os argumentos
   antes de atribuir) — declare e atribua em comandos separados.
+- Pegadinha de bash 2: função que termina num laço `while` cujo corpo acaba em `[[ … ]] && {…}`
+  VAZA rc 1 quando a última iteração não casa — e `x="$(essa_funcao)"` sob `set -e` mata o
+  processo MUDO (foi o `moj test --run` parando sem mensagem depois do pré-voo). Função-leitora
+  termina com `return 0` explícito; atribuição de comando que pode falhar leva `|| true`.
+- **`moj test --run` só se testa DE VERDADE em máquina com bwrap REAL** (o dev tem fbwrap e morre
+  antes do caminho de julgamento — use o juiz de produção como bancada: copie o pacote + mojtools
+  p/ ~ribas e rode com `CAGE_ROOT` apontando p/ a rootfs).
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
 - **Doc junto com o código** (doc atrasada = bug): mudou subcomando/contrato? atualize o `README.md`, o
   cabeçalho de `moj` e `cdmoj/docs/API.md` (+ `openapi.json`) no mesmo commit.
