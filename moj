@@ -61,6 +61,13 @@ _pairs(){ local d="$1" w="$2" of="$3" nm op ex idx notes='[]'
   shopt -u nullglob
   for nm in "${names[@]}"; do
     op="$d/tests/output/$nm"; [[ -f "$op" ]] || op=/dev/null
+    # nota do exemplo: formato de autoria docs/notes/<sample>.md (markdown puro, --rawfile —
+    # nota grande nunca passa por argv); legado sample-notes.json por índice
+    if [[ "$w" == sample && -f "$d/docs/notes/$nm.md" ]]; then
+      jq -nc --arg nm "$nm" --rawfile i "$d/tests/input/$nm" --rawfile o "$op" --rawfile ex "$d/docs/notes/$nm.md" \
+         '($ex|rtrimstr("\n")) as $e | {name:$nm,input:$i,output:$o} + (if $e=="" then {} else {explanation:$e} end)' >> "$of"
+      continue
+    fi
     ex=''; if [[ "$w" == sample && "$nm" =~ ^sample([0-9]+)$ ]]; then idx=$(( ${BASH_REMATCH[1]} - 1 )); ex="$(jq -r --argjson i "$idx" '.[$i] // ""' <<<"$notes" 2>/dev/null)"; fi
     jq -nc --arg nm "$nm" --rawfile i "$d/tests/input/$nm" --rawfile o "$op" --arg ex "$ex" \
        '{name:$nm,input:$i,output:$o} + (if $ex=="" then {} else {explanation:$ex} end)' >> "$of"
@@ -102,6 +109,11 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   # diretório/arquivo existe localmente — clone antigo não apaga scripts/score de ninguém.
   local rtflag=n
   { [[ -d "$d/scripts" || -f "$d/tests/score" ]] || [[ "$(jq -r '.scripts_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && rtflag=y
+  # imagens de docs/ (docs_files): mesmo racional do scripts_rt — só manda o campo se o clone
+  # é CIENTE (docs_rt) ou há imagem local; clone antigo não apaga a figura de ninguém.
+  _docs_nd "$d" "$t/dfl"
+  local dfflag=n
+  { [[ -s "$t/dfl" ]] || [[ "$(jq -r '.docs_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && dfflag=y
   jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
@@ -109,15 +121,32 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
         --argjson langs "$([[ -f "$d/.moj-id" ]] && jq -c '.languages//[]' "$d/.moj-id" || echo '[]')" \
         --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" --slurpfile scr "$t/scr" \
+        --slurpfile dfl "$t/dfl" \
         --slurpfile good "$t/good" --slurpfile slow "$t/slow" --slurpfile wrong "$t/wrong" \
         --slurpfile pass "$t/pass" --slurpfile up "$t/up" --rawfile scoretxt "$scoref" \
         --arg edflag "$([[ -f "$d/docs/solucao.md" ]] && echo y)" --rawfile editorial "$edf" \
-        --arg rtflag "$rtflag" '
+        --arg rtflag "$rtflag" --arg dfflag "$dfflag" '
     {title:$title, author:$author, tags:$tags, collections:$colls, languages:$langs, enunciado_md:$enun, enunciado_format:$efmt,
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
     + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
+    + (if $dfflag=="y" then {docs_files:$dfl} else {} end)
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
   rm -rf "$t"; }
+# _docs_nd <pkg> <outfile> — NDJSON {name, content_b64} das IMAGENS de docs/ (cap 2MB; maiores
+# são PULADAS com aviso — imagem de enunciado não precisa disso tudo)
+_docs_nd(){ local d="$1" of="$2" f b sz; : > "$of"; b="$(mktemp)"
+  shopt -s nullglob
+  for f in "$d/docs"/*.png "$d/docs"/*.jpg "$d/docs"/*.jpeg "$d/docs"/*.gif "$d/docs"/*.svg "$d/docs"/*.webp \
+           "$d/docs"/*.PNG "$d/docs"/*.JPG "$d/docs"/*.JPEG "$d/docs"/*.GIF "$d/docs"/*.SVG "$d/docs"/*.WEBP; do
+    [[ -f "$f" ]] || continue
+    sz="$(wc -c < "$f")"
+    if (( sz > 2097152 )); then echo "  ⚠ imagem grande demais (>2MB), NÃO enviada: ${f##*/} — reduza-a" >&2; continue; fi
+    _b64file "$f" > "$b"
+    jq -nc --arg n "${f##*/}" --rawfile b64 "$b" '{name:$n, content_b64:$b64}' >> "$of"
+  done
+  shopt -u nullglob; rm -f "$b"; }
+# base64 de arquivo numa linha, portável (GNU -w0; BSD/macOS sem -w)
+_b64file(){ base64 < "$1" | tr -d '\n'; }
 # json_to_pkg <json-FILE> <dir> <id> — materializa o pacote a partir do /problems/source.
 #
 # O JSON vem em ARQUIVO, NUNCA em variável. Duas razões, as duas graves num pacote grande (o source
@@ -157,8 +186,28 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
   printf '%s' "$S_CF" > "$d/conf"
   if [[ -n "$S_ED" ]]; then printf '%s' "$S_ED" > "$d/docs/solucao.md"; else rm -f "$d/docs/solucao.md"; fi
   if [[ -n "$S_SC" ]]; then printf '%s' "$S_SC" > "$d/tests/score"; else rm -f "$d/tests/score"; fi
+  # notas -> docs/notes/sample<N>.md (formato de autoria: 1 markdown por exemplo; o json
+  # legado NUNCA mais é materializado num clone novo)
+  rm -rf "$d/docs/notes"; rm -f "$d/docs/sample-notes.json"
   if [[ "$(jq -r 'map(select(.!=""))|length' <<<"${S_NT:-[]}" 2>/dev/null)" -gt 0 ]]; then
-    printf '%s' "$S_NT" > "$d/docs/sample-notes.json"; else rm -f "$d/docs/sample-notes.json"; fi
+    mkdir -p "$d/docs/notes"
+    local nk=0 nc ntf; ntf="$(mktemp)"
+    nc="$(jq 'length' <<<"$S_NT" 2>/dev/null)"; [[ "$nc" =~ ^[0-9]+$ ]] || nc=0
+    while (( nk < nc )); do
+      jq -r --argjson k "$nk" '.[$k] // ""' <<<"$S_NT" > "$ntf" 2>/dev/null
+      [[ -n "$(tr -d '[:space:]' < "$ntf" 2>/dev/null)" ]] && cp "$ntf" "$d/docs/notes/sample$((nk+1)).md"
+      nk=$((nk+1))
+    done
+    rm -f "$ntf"
+  fi
+  # imagens de docs/ (docs_files) do servidor -> arquivos locais
+  jq --raw-output0 '(.docs_files//[])[] | (.name // ""), (.content_b64 // "")' < "$jf" > "$T/df.nul" 2>/dev/null
+  local dfn='' dfb=''
+  while IFS= read -r -d '' dfn && IFS= read -r -d '' dfb; do
+    dfn="${dfn##*/}"
+    [[ "$dfn" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpg|jpeg|gif|svg|webp|PNG|JPG|JPEG|GIF|SVG|WEBP)$ ]] || continue
+    printf '%s' "$dfb" | _b64dec > "$d/docs/$dfn" 2>/dev/null || rm -f "$d/docs/$dfn"
+  done < "$T/df.nul"
 
   # exemplos e testes: 1 passada cada
   jq --raw-output0 '(.examples//[])[] | (.input // ""), (.output // "")' < "$jf" > "$T/ex.nul" 2>/dev/null
@@ -206,7 +255,7 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --slurpfile s "$jf" \
     '($s[0] // {}) as $src
      | {id:$id, repo:$r, prob:$p, title:($src.title//""), format:$fmt, collections:($src.collections//[]),
-        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true}' > "$d/.moj-id"
+        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true, docs_rt:true}' > "$d/.moj-id"
   rm -rf "$T" "${_t:-}"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
@@ -675,9 +724,18 @@ cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz
   jq -n --arg r "$2" --arg p "${3:-}" --rawfile t "$b64" '{repo:$r, prob:(if $p=="" then null else $p end), tar_b64:$t}' > "$bf"
   api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
-  local body; body="$(jq -c '{title, enunciado_md, enunciado_format, examples}' <<<"$(pkg_to_json "$d")")"
+  # imagens locais de docs/ vão JUNTO (campo images) — o preview do servidor as embute; sem
+  # isso, `![](fig.png)` sumia SÓ no preview (o render servido sempre embutiu)
+  local t; t="$(mktemp -d)"
+  _docs_nd "$d" "$t/imgs" 2>/dev/null
+  local body; body="$(jq -c --slurpfile im "$t/imgs" \
+      --arg pid "$([[ -f "$d/.moj-id" ]] && jq -r '.id//""' "$d/.moj-id" || echo '')" \
+      '{title, enunciado_md, enunciado_format, examples}
+       + (if ($im|length) > 0 then {images:$im} else {} end)
+       + (if $pid != "" then {id:$pid} else {} end)' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp)"; mv "$out" "$out.html"; out="$out.html"   # sem mktemp --suffix (BSD não tem)
   api POST "/problems/preview" "$body" | jq -r '.html_b64' | _b64dec > "$out"
+  rm -rf "$t"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
 # COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
@@ -708,10 +766,15 @@ mid_set(){ local d="$1"; shift; local t; t="$(mktemp)"; jq "$@" "$d/.moj-id" > "
 edit_examples(){ local d="$1"
   while true; do echo; echo "Exemplos (aparecem no enunciado):"
     local i=0 f; shopt -s nullglob; for f in "$d/tests/input"/sample*; do i=$((i+1)); echo "  $i) $(basename "$f")  in: $(head -c40 "$f"|tr '\n' ' ')"; done; shopt -u nullglob
-    case "$(ask "  [a]dicionar [e]ditar N [r]emover N [v]oltar: ")" in
+    case "$(ask "  [a]dicionar [e]ditar N [n]ota N (explicação md) [r]emover N [v]oltar: ")" in
       a) local n=$(( $(find "$d/tests/input" -name 'sample*'|wc -l) + 1 )); "$ED" "$d/tests/input/sample$n" </dev/tty; "$ED" "$d/tests/output/sample$n" </dev/tty;;
       e*) local k="${REPLY:-}"; k="$(ask '  qual N? ')"; [[ -f "$d/tests/input/sample$k" ]] && { "$ED" "$d/tests/input/sample$k" </dev/tty; "$ED" "$d/tests/output/sample$k" </dev/tty; };;
-      r*) local k; k="$(ask '  qual N? ')"; rm -f "$d/tests/input/sample$k" "$d/tests/output/sample$k";;
+      n*) local k; k="$(ask '  qual N? ')"
+          if [[ -f "$d/tests/input/sample$k" ]]; then
+            mkdir -p "$d/docs/notes"; "$ED" "$d/docs/notes/sample$k.md" </dev/tty
+            [[ -s "$d/docs/notes/sample$k.md" ]] || rm -f "$d/docs/notes/sample$k.md"
+          else echo "  sample$k não existe"; fi;;
+      r*) local k; k="$(ask '  qual N? ')"; rm -f "$d/tests/input/sample$k" "$d/tests/output/sample$k" "$d/docs/notes/sample$k.md";;
       *) return;;
     esac; done; }
 edit_tests(){ local d="$1"
