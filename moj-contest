@@ -17,7 +17,8 @@
 #   moj-contest -c <cid> settings [get]        moj-contest -c <cid> settings set k=v [k=v…]
 #     (penalidade ICPC: settings set penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce;
 #      penalty_verdicts= [vazio] = nenhum verdict penaliza;
-#      pool de juízes: settings set judges=cpu1,cpu2 — vazio [judges=] = qualquer juiz)
+#      pool de juízes: settings set judges=cpu1,cpu2 — vazio [judges=] = qualquer juiz;
+#      correção manual: settings set manual_verdict=true review_judges=2 [1..5 juízes validam])
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
@@ -176,6 +177,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
           name|locale|login_ua_substring) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
           start|end|login_start|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
           penalty_minutes) [[ "$v" =~ ^[0-9]+$ ]] || die "penalty_minutes espera inteiro (minutos)"; body="$(jq -c --argjson v "$v" '.penalty_minutes=$v' <<<"$body")";;
+          review_judges) [[ "$v" =~ ^[1-5]$ ]] || die "review_judges espera 1..5 (nº de juízes que validam cada veredicto; default 2)"; body="$(jq -c --argjson v "$v" '.review_judges=$v' <<<"$body")";;
           *) case "$v" in
                true|false) body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
                *) die "$k: esperado true/false (toggles) — ou use um dos campos texto/epoch";;
