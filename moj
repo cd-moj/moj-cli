@@ -19,6 +19,8 @@
 #   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
 #   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
 #   moj fn <dir> [--langs c,cpp,py,java,rs]  (drivers de SUBMISSÃO DE FUNÇÃO — mojtools local)
+#   moj languages <dir> [c,cpp,py,…|all]  (whitelist de linguagens de SUBMISSÃO; obrigatória
+#                                          em problema de função/ban — sem ela, trocar de linguagem burla o driver)
 #   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
 #   moj log <id> [-n N] | moj log <id> <sha>   (histórico git do problema; com <sha> mostra o diff -p)
 #   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
@@ -699,8 +701,28 @@ cmd_upload(){ need_login
   if [[ -d "$src" ]]; then
     [[ -f "$src/conf" || -d "$src/tests" ]] || die "'$src' não parece um pacote MOJ (sem conf/tests)"
     tmptar="$(mktemp)"; tarball="$tmptar"
-    tar -czf "$tarball" -C "$src" --exclude='./.git' --exclude='./.moj-id' \
-        --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.pre-normalizacao*' .
+    # o .moj-id (ponteiro local) NÃO sobe — mas título/coleções/LANGUAGES dele SOBEM, num
+    # .moj-meta.json sintetizado anexado por ÚLTIMO ao tar (membro posterior vence na extração
+    # do servidor). Sem isto, upload de um pacote clonado zerava a whitelist de linguagens.
+    local tx metad=""
+    tx=(--exclude='./.git' --exclude='./.moj-id' \
+        --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.pre-normalizacao*')
+    if [[ -f "$src/.moj-id" ]]; then
+      local basemeta='{}'
+      [[ -f "$src/.moj-meta.json" ]] && jq -e . "$src/.moj-meta.json" >/dev/null 2>&1 && basemeta="$(cat "$src/.moj-meta.json")"
+      metad="$(mktemp -d)"
+      jq -s '(.[0]) + ((.[1] // {}) as $mid
+             | {collections:($mid.collections // []), languages:($mid.languages // [])}
+             + (if ($mid.title // "") != "" then {display_title:$mid.title} else {} end))' \
+        <(printf '%s' "$basemeta") "$src/.moj-id" > "$metad/.moj-meta.json" \
+        || die "não consegui sintetizar o .moj-meta.json a partir do .moj-id (JSON inválido?)"
+    fi
+    if [[ -n "$metad" ]]; then
+      tar -czf "$tarball" "${tx[@]}" -C "$src" . -C "$metad" ./.moj-meta.json
+    else
+      tar -czf "$tarball" "${tx[@]}" -C "$src" .
+    fi
+    rm -rf ${metad:+"$metad"}
     echo "empacotado: $src -> $(du -h "$tarball" 2>/dev/null | cut -f1 || echo '?')"
   elif [[ -f "$src" ]]; then tarball="$src"
   else die "arquivo/diretório não encontrado: $src"; fi
@@ -764,6 +786,26 @@ cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
       api POST "/problems/collection-delete" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"excluída: \(.name) (untag dos problemas em segundo plano; some do registro ao final)"';;
     *) die "subcomando de coleção: ls | create | show | add | remove | rename | delete";;
   esac; }
+
+# languages = WHITELIST de linguagens de SUBMISSÃO do problema ([]/ausente = todas as padrão).
+# Vive no .moj-id local e viaja no `moj push` (campo) E no `moj upload` (meta sintetizado).
+# Essencial em problema de função/ban: sem whitelist, trocar de linguagem burla o driver.
+cmd_languages(){ local d="${1:-.}" list="${2:-}"
+  [[ -f "$d/.moj-id" ]] || die "'$d' não é um pacote clonado (sem .moj-id) — use moj clone/new antes."
+  if [[ -z "$list" ]]; then
+    local cur; cur="$(jq -r '(.languages // []) | join(",")' "$d/.moj-id" 2>/dev/null)"
+    if [[ -n "$cur" ]]; then echo "languages: $cur"
+    else echo "languages: (todas as padrão — sem whitelist)"; fi
+    echo "  setar:  moj languages $d c,cpp,py[,java,rs,…]     liberar todas:  moj languages $d all"
+    return 0
+  fi
+  if [[ "$list" == all || "$list" == todas ]]; then
+    mid_set "$d" '.languages=[]'
+    echo "languages: (todas as padrão)  — aplica no próximo push/SALVAR"
+  else
+    mid_set "$d" --argjson l "$(jq -n --arg s "$list" '$s|ascii_downcase|split(",")|map(gsub("^ +| +$";""))|map(select(length>0))|unique')" '.languages=$l'
+    echo "languages: $(jq -r '(.languages)|join(",")' "$d/.moj-id")  — aplica no próximo push/SALVAR"
+  fi; }
 
 # ---- editor interativo (como os campos da página) -----------------------------------------
 mid(){ jq -r ".$2 // \"\"" "$1/.moj-id" 2>/dev/null; }                 # campo do .moj-id
@@ -836,7 +878,8 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
     printf '  1) Título:    %s\n  2) Autor:     %s\n  3) Tags:      %s\n' "$(mid "$D" title)" "$(head -1 "$D/author" 2>/dev/null)" "$(paste -sd, "$D/tags" 2>/dev/null)"
     printf '  4) Enunciado  (editor)   5) Exemplos (%s)   6) Testes ocultos (%s)\n' "$(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l)" "$(( $(find "$D/tests/input" -type f 2>/dev/null|wc -l) - $(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l) ))"
     printf '  7) Soluções (good:%s wrong:%s slow:%s)   8) Conf   9) Coleções: %s\n' "$(ls "$D/sols/good" 2>/dev/null|wc -l)" "$(ls "$D/sols/wrong" 2>/dev/null|wc -l)" "$(ls "$D/sols/slow" 2>/dev/null|wc -l)" "$(jq -r '(.collections//[])|join(",")' "$D/.moj-id")"
-    printf '  0) Público: %s    r) Compartilhar pasta    v) Pré-visualizar\n' "$(mid "$D" public)"
+    printf '  0) Público: %s   L) Linguagens: %s   r) Compartilhar pasta   v) Pré-visualizar\n' \
+      "$(mid "$D" public)" "$(jq -r 'if ((.languages//[])|length)>0 then (.languages|join(",")) else "todas" end' "$D/.moj-id")"
     printf '  w) SALVAR (push)   P) Validar & Publicar   i) Info/validação   q) Sair\n'
     case "$(ask '  > ')" in
       1) mid_set "$D" --arg t "$(ask '  Título: ' "$(mid "$D" title)")" '.title=$t';;
@@ -844,6 +887,9 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
       3) ask '  Tags (vírgula): ' "$(paste -sd, "$D/tags" 2>/dev/null)" | tr ',' '\n' | sed '/^[[:space:]]*$/d;s/^[[:space:]]*//;s/[[:space:]]*$//' > "$D/tags";;
       4) "$ED" "$(enun_path "$D")" </dev/tty;;
       5) edit_examples "$D";; 6) edit_tests "$D";; 7) edit_sols "$D";; 8) edit_conf "$D";; 9) edit_colls "$D";;
+      L|l) local nl; nl="$(ask '  linguagens (vírgula; "all"=todas as padrão): ' "$(jq -r '(.languages//[])|join(",")' "$D/.moj-id")")"
+           [[ -n "$nl" ]] || nl=all
+           cmd_languages "$D" "$nl";;
       0) local p; p="$(mid "$D" public)"; [[ "$p" == true ]] && p=false || p=true; mid_set "$D" --argjson p "$p" '.public=$p'; echo "  (aplica no próximo 'salvar')";;
       r) local act u; act="$(ask '  [a]dd ou [r]emove colaborador? ')"; u="$(ask '  login: ')"; [[ -n "$u" ]] && { [[ "$act" == r ]] && cmd_unshare "$(mid "$D" repo)" "$u" || cmd_share "$(mid "$D" repo)" "$u"; };;
       v) cmd_preview "$D";;
@@ -880,7 +926,8 @@ case "$cmd" in
   doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update|selfupdate) cmd_update "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
+  languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

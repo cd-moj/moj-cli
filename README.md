@@ -83,7 +83,8 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj doctor` · `moj version` · `moj update` | **diagnóstico do ambiente** (atualização, jq/curl, mojtools, bwrap, sessão) · build local×servidor · **auto-atualiza** a CLI baixando os artefatos servidos |
 | `moj checker <dir> <checker.cpp>` · `moj interactive <dir> <arbitro> [--score]` · `moj fn <dir> [--langs …]` | instala **checker testlib** / **problema interativo** / **drivers de submissão de função** (5 linguagens, com sentinela anti-IO) — requerem checkout local do mojtools (`MOJTOOLS_DIR`) |
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
-| `moj download <id> [arq] [--sha <sha>]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro (`--sha` = a versão daquele commit); **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id`) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip` |
+| `moj download <id> [arq] [--sha <sha>]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro (`--sha` = a versão daquele commit); **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id` — mas **sintetiza** um `.moj-meta.json` com título/coleções/**languages** do `.moj-id`, então um clone sobe completo) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip`. No servidor: meta ausente/`[]` ⇒ preserva; tar **sem** o arquivo `tags` ⇒ tags preservadas |
+| `moj languages <dir> [c,cpp,py,…\|all]` | **whitelist de linguagens de submissão** do problema (sem args: mostra; `all` = todas as padrão). Grava no `.moj-id`; aplica no próximo `push` (ou no `upload`, via meta sintetizado). **Obrigatória em problema de função/ban** — sem ela, trocar de linguagem burla o driver |
 | `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
 | `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
 | `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) + pede calibração ao juiz e mostra o relatório. O problema **continua privado** — é o comando para prova em elaboração |
@@ -128,9 +129,12 @@ título (ver "Portão de qualidade").
 No servidor os metadados ficam em `.moj-meta.json` (`display_title`, `public`, `collections`,
 `languages`, `owner`) — gerado a partir do que você envia; você não o edita à mão. **`languages`** =
 ids de linguagem de submissão permitidos deste problema (`[]`/ausente = todas; ex.: `["pddl"]` p/ um
-problema que só aceita PDDL); faz round-trip no `.moj-id` (`clone`→edita→`push`). `moj push` manda os
-campos (title/coleções/linguagens do `.moj-id`); `moj upload` sobe um `.tar`/`.zip` inteiro (o
-`.moj-meta.json`, com `display_title` e `languages`, tem de estar no pacote).
+problema que só aceita PDDL); faz round-trip no `.moj-id` (`clone`→`moj languages`/edita→`push`).
+`moj push` manda os campos (title/coleções/linguagens do `.moj-id`); `moj upload` sobe um
+`.tar`/`.zip` inteiro E leva os mesmos campos: de um diretório com `.moj-id`, a CLI **sintetiza** o
+`.moj-meta.json` no tar; de um tar de `moj download`, o meta real já está lá. Nos dois casos o
+servidor lê só os campos de CONTEÚDO (título/coleções/languages; ausente/`[]` ⇒ preserva) — `public`
+e `owner` nunca vêm do tar.
 
 ## CLI do competidor (`moj-comp` / `moj comp …`)
 
