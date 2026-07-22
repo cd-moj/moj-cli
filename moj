@@ -18,6 +18,7 @@
 #   moj doctor | version | update (diagnóstico do ambiente · build local×servidor · auto-atualiza)
 #   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
 #   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
+#   moj fn <dir> [--langs c,cpp,py,java,rs]  (drivers de SUBMISSÃO DE FUNÇÃO — mojtools local)
 #   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
 #   moj log <id> [-n N] | moj log <id> <sha>   (histórico git do problema; com <sha> mostra o diff -p)
 #   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
@@ -548,7 +549,7 @@ cmd_doctor(){ local bad=0 srv mt="" c head
   have jq   || { echo "✗ jq AUSENTE — a CLI inteira depende dele (instale jq)"; bad=1; }
   have curl || { echo "✗ curl AUSENTE"; bad=1; }
   echo "· bash $BASH_VERSION · jq $(jq --version 2>/dev/null || echo '—') · curl $(curl --version 2>/dev/null | head -1 | awk '{print $2}')"
-  # mojtools (só p/ checker/interactive/test --run): qual candidato responde?
+  # mojtools (só p/ checker/interactive/fn/test --run): qual candidato responde?
   if [[ -n "${MOJTOOLS_DIR:-}" && ! -f "${MOJTOOLS_DIR}/build-and-test.sh" ]]; then
     echo "✗ MOJTOOLS_DIR aponta p/ caminho inválido: $MOJTOOLS_DIR (sem build-and-test.sh)"; bad=1
   fi
@@ -561,7 +562,7 @@ cmd_doctor(){ local bad=0 srv mt="" c head
     [[ -n "$head" ]] && echo "  · versão local: $head — atualize com: git -C '$mt' pull"
   else
     echo "· mojtools não encontrado (procurei: \$MOJTOOLS_DIR, ../mojtools do script, ~/moj/mojtools)"
-    echo "  só é necessário p/ 'moj checker', 'moj interactive' e 'moj test --run'. Para instalar:"
+    echo "  só é necessário p/ 'moj checker', 'moj interactive', 'moj fn' e 'moj test --run'. Para instalar:"
     echo "  git clone https://github.com/cd-moj/mojtools ~/moj/mojtools   (ou exporte MOJTOOLS_DIR)"
   fi
   # bwrap (só p/ test --run)
@@ -580,6 +581,10 @@ cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp>   (ch
   local mt; mt="$(mojtools_dir)"
   bash "$mt/testlib/install-checker.sh" "$1" "$2"
   echo "dica: 'moj push $1' já envia scripts/ (round-trip); 'moj test $1 --run' julga local."; }
+cmd_fn(){ [[ $# -ge 1 ]] || die "uso: moj fn <dir> [--langs c,cpp,py,java,rs]   (drivers de submissão de função; ver mojtools/docs/submissao-de-funcao.md)"
+  local mt; mt="$(mojtools_dir)"
+  bash "$mt/fn/install-fn.sh" "$@"
+  echo "dica: 'moj push $1' já envia scripts/ (round-trip); edite os EDIT-ME antes."; }
 cmd_interactive(){ [[ $# -ge 2 ]] || die "uso: moj interactive <dir> <arbitro.cpp|.py|.sh> [--score] [--langs \"...\"]   (ver mojtools/docs/problema-interativo.md)"
   local mt; mt="$(mojtools_dir)"; local d="$1" arb="$2"; shift 2
   bash "$mt/interactive/install-interactive.sh" "$d" "$arb" "$@"
@@ -868,7 +873,7 @@ case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
-  checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";;
+  checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";; fn|funcao) cmd_fn "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   log|history) cmd_log "$@";; restore) cmd_restore "$@";;
   validate|validar) cmd_validate "$@";;
@@ -876,6 +881,6 @@ case "$cmd" in
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

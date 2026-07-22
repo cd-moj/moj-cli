@@ -49,7 +49,7 @@ _fmt_epoch(){ date -d "@$1" "${2:-+%d/%m %H:%M}" 2>/dev/null || date -r "$1" "${
 RAW="${RAW:-0}"
 out(){ if [[ "$RAW" == 1 ]]; then cat; else jq -r "$1"; fi; }
 
-# ---- mojtools local (comandos de autoria que rodam NA MÁQUINA: checker/interactive/test --run)
+# ---- mojtools local (comandos de autoria que rodam NA MÁQUINA: checker/interactive/fn/test --run)
 # Ordem: $MOJTOOLS_DIR -> irmão do checkout da CLI -> ~/moj/mojtools. die com dica de clone.
 mojtools_dir(){
   local c
@@ -58,7 +58,7 @@ mojtools_dir(){
   for c in "${MOJTOOLS_DIR:-}" "$(dirname "$(_abspath "${BASH_SOURCE[1]:-$0}")")/../mojtools" "$HOME/moj/mojtools"; do
     [[ -n "$c" && -f "$c/build-and-test.sh" ]] && { _abspath "$c"; return 0; }
   done
-  die "mojtools não encontrado — só é preciso p/ checker/interactive/test --run: git clone https://github.com/cd-moj/mojtools ~/moj/mojtools (ou exporte MOJTOOLS_DIR). Diagnóstico: $MOJ_TOOL doctor"
+  die "mojtools não encontrado — só é preciso p/ checker/interactive/fn/test --run: git clone https://github.com/cd-moj/mojtools ~/moj/mojtools (ou exporte MOJTOOLS_DIR). Diagnóstico: $MOJ_TOOL doctor"
 }
 
 # ---- versão / auto-atualização (comuns a TODAS as camadas: moj, moj-contest, moj-judges,
