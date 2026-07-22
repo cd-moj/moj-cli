@@ -577,11 +577,11 @@ cmd_doctor(){ local bad=0 srv mt="" c head
   if (( bad == 0 )); then echo "tudo certo."; else echo "há itens ✗ acima."; fi
   return $bad; }
 # atalhos p/ os instaladores do mojtools (autoria local; requerem checkout do mojtools)
-cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp>   (checker testlib normalizado; ver mojtools/docs/checker-testlib.md)"
+cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp> [--force]   (checker testlib; COMPÕE com moj fn — ver docs/correcao-especial.md)"
   local mt; mt="$(mojtools_dir)"
-  bash "$mt/testlib/install-checker.sh" "$1" "$2"
+  bash "$mt/testlib/install-checker.sh" "$@"
   echo "dica: 'moj push $1' já envia scripts/ (round-trip); 'moj test $1 --run' julga local."; }
-cmd_fn(){ [[ $# -ge 1 ]] || die "uso: moj fn <dir> [--langs c,cpp,py,java,rs]   (drivers de submissão de função; ver mojtools/docs/submissao-de-funcao.md)"
+cmd_fn(){ [[ $# -ge 1 ]] || die "uso: moj fn <dir> [--langs c,cpp,py,java,rs] [--force]   (drivers de submissão de função; COMPÕE com moj checker — ver docs/submissao-de-funcao.md)"
   local mt; mt="$(mojtools_dir)"
   bash "$mt/fn/install-fn.sh" "$@"
   echo "dica: 'moj push $1' já envia scripts/ (round-trip); edite os EDIT-ME antes."; }
