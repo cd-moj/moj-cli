@@ -24,13 +24,15 @@
 #   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
 #   moj log <id> [-n N] | moj log <id> <sha>   (histórico git do problema; com <sha> mostra o diff -p)
 #   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
-#   moj validate <id>             (portão de qualidade + calibração; NÃO publica — pode ser privado)
+#   moj validate <id>             (valida E (RE)ENFILEIRA calibração; NÃO publica — pode ser privado.
+#                                  Só CONSULTAR o estado = moj status/check, que são read-only)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id> | --all-stale  (lote: recalibra TUDO que "precisa recalibrar" no painel)
 #   (--json antes do subcomando = saída crua em ls/board/status/check)
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
 #   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
-#   moj collection ls|create|show|add|remove|rename|delete  (coleções = tags de agrupamento, m:n)
+#   moj collection ls|create|show|add|remove|rename|delete|status  (coleções = tags de agrupamento, m:n;
+#                                  rename/delete acompanham o re-tag até o fim — --no-wait solta)
 #   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
 #   moj collection ls | create <nome> [--members a,b] [--admins c]
@@ -474,7 +476,13 @@ score_gate(){ local d="$1" ok=1
   [[ $ok -eq 1 ]]; }
 gate(){ local d="$1" ok=1
   [[ -s "$d/docs/enunciado.md" || -s "$d/enunciado.md" ]] || { echo "  ⚠ sem enunciado" >&2; ok=0; }
-  [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
+  # INTERATIVO (driver run.sh por linguagem ou árbitro em scripts/) não tem sample*/output —
+  # quem corrige é o árbitro. Exigir exemplo virava um --force ritual em todo push.
+  if compgen -G "$d/scripts/*/run.sh" >/dev/null 2>&1 || compgen -G "$d/scripts/arbitro.*" >/dev/null 2>&1; then
+    echo "  (interativo: exemplos opcionais — o árbitro corrige)"
+  else
+    [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
+  fi
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
   if [[ -f "$d/tests/score" ]]; then score_gate "$d" || ok=0; fi
   [[ $ok -eq 1 ]]; }
@@ -733,11 +741,9 @@ cmd_upload(){ need_login
     [[ $force -eq 1 || "${MOJ_ALLOW_NO_TITLE:-}" == 1 ]] || die "o pacote não tem 'display_title' no .moj-meta.json — o problema sairia com o nome da pasta. Inclua o campo (ou --force p/ enviar assim)."
     echo "  ⚠ sem display_title no pacote — o servidor vai derivar do enunciado/pasta."
   fi
-  # footgun documentado: o upload substitui TUDO, inclusive o .moj-meta.json — public:false
-  # no pacote DESPUBLICA um problema público (publique de novo com 'moj public <id> on').
-  # (o `//` do jq engole false — testar com ==, nunca com .public // "ausente")
-  [[ "$(jq -r '.public == false' <<<"$meta" 2>/dev/null)" == true ]] && \
-    echo "  ⚠ o .moj-meta.json do pacote tem public:false — se o problema estiver público, este upload o DESPUBLICA."
+  # `public` do tar é IGNORADO pelo servidor (campo de ACESSO — só o /problems/set-public o
+  # muda; upload nem publica nem despublica). O aviso antigo de "DESPUBLICA" era de antes do
+  # servidor proteger o meta (cdmoj 7bbe17a) e ficou obsoleto — removido.
   local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; _b64enc "$tarball" > "$b64"
   jq -n --arg id "$id" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
   api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'
@@ -962,6 +968,6 @@ case "$cmd" in
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

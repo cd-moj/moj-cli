@@ -87,14 +87,14 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj languages <dir> [c,cpp,py,…\|all]` | **whitelist de linguagens de submissão** do problema (sem args: mostra; `all` = todas as padrão). Grava no `.moj-id`; aplica no próximo `push` (ou no `upload`, via meta sintetizado). **Obrigatória em problema de função/ban** — sem ela, trocar de linguagem burla o driver |
 | `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
 | `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
-| `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) + pede calibração ao juiz e mostra o relatório. O problema **continua privado** — é o comando para prova em elaboração |
+| `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) **e (RE)ENFILEIRA calibração** no juiz. O problema **continua privado** — é o comando para prova em elaboração. ⚠ Não use como "ver status": cada chamada re-dispara calibração — p/ só CONSULTAR use `moj status`/`check` (read-only) |
 | `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar; **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
 | `moj org list\|create\|members\|public\|rm` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda). `rm <nome>` remove uma org **vazia** (a implícita não sai) |
 | `moj mv <id> <org>` | move um **rascunho** p/ outra org (muda o id `<org>#<prob>`; bloqueia se público/em uso) |
-| `moj collection ls\|show\|create\|add\|remove\|rename\|delete` | **coleções = TAGS de agrupamento** (m:n, ORTOGONAL à org; o nome pode ter **espaços**). `create "<nome>"`, `add/remove <id> "<nome>"` (marca/desmarca no problema), `show "<nome>"` (browse), `rename`/`delete` (dono da coleção) |
+| `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | **coleções = TAGS de agrupamento** (m:n, ORTOGONAL à org; o nome pode ter **espaços**). `create "<nome>"`, `add/remove <id> "<nome>"` (marca/desmarca no problema), `show "<nome>"` (browse), `rename`/`delete` (dono da coleção) — o re-tag roda em background no servidor e a CLI **acompanha até o fim** (progresso e falhas; `--no-wait` solta); `status [job\|nome]` lista os jobs |
 
 ## Pacote do problema (arquivos)
 
