@@ -765,6 +765,26 @@ cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs"
   rm -rf "$t"
   echo "preview: $out"; have xdg-open && (xdg-open "$out" >/dev/null 2>&1 &) || true; }
 
+# _retag_wait <jobid> — acompanha o job de retag (rename/delete rodam em BACKGROUND no servidor)
+# até terminar. Ctrl-C é seguro (o job segue no servidor); 10 min sem terminar vira dica de consulta.
+_retag_wait(){ local jid="$1" j dn tt fl fin extra deadline=$((SECONDS+600))
+  [[ -n "$jid" ]] || return 0
+  while (( SECONDS < deadline )); do
+    sleep 2
+    j="$(api GET "/problems/collection-retag-status?job=$(enc "$jid")" 2>/dev/null | jq -c '.jobs[0] // empty' 2>/dev/null)" || j=""
+    [[ -n "$j" ]] || continue
+    dn="$(jq -r '.done // 0' <<<"$j")"; tt="$(jq -r '.total // "?"' <<<"$j")"
+    fl="$(jq -r '.failed // 0' <<<"$j")"; fin="$(jq -r '.finished_at // empty' <<<"$j")"
+    extra=""; [[ "$fl" != 0 ]] && extra="  ⚠ falhas: $fl"
+    printf '\r  re-tag: %s/%s%s   ' "$dn" "$tt" "$extra"
+    if [[ -n "$fin" ]]; then
+      printf '\r  re-tag concluído: %s problema(s)%s          \n' "$dn" "$extra"
+      [[ "$fl" != 0 ]] && echo "  ⚠ houve falhas — repita o comando (o retag é retomável) e confira com moj collection show"
+      return 0
+    fi
+  done
+  printf '\n  (ainda rodando — acompanhe com: moj collection status %s)\n' "$jid"; return 0; }
+
 # COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
 # pode ter ESPAÇOS. Marcar um problema numa coleção exige que ela EXISTA (crie antes).
 cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
@@ -780,11 +800,25 @@ cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
     remove|rm) [[ $# -ge 2 ]] || die "uso: moj collection remove <id> \"<coleção>\""
       local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")" | jq -c '.collections // []')"
       api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:($c|map(select(.!=$n)))}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
-    rename) [[ $# -ge 2 ]] || die "uso: moj collection rename \"<nome>\" \"<novo>\""
-      api POST "/problems/collection-rename" "$(jq -n --arg n "$1" --arg t "$2" '{name:$n, to:$t}')" | jq -r '"renomeada: \(.from) -> \(.name) (re-tag dos problemas em segundo plano" + (if .resumed then "; RETOMADA de bulk interrompido" else "" end) + ")"';;
-    delete|del) [[ $# -ge 1 ]] || die "uso: moj collection delete \"<nome>\""
-      api POST "/problems/collection-delete" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"excluída: \(.name) (untag dos problemas em segundo plano; some do registro ao final)"';;
-    *) die "subcomando de coleção: ls | create | show | add | remove | rename | delete";;
+    rename) local nowait=0 ra=() a2
+      for a2 in "$@"; do case "$a2" in --no-wait) nowait=1;; *) ra+=("$a2");; esac; done
+      [[ ${#ra[@]} -ge 2 ]] || die "uso: moj collection rename \"<nome>\" \"<novo>\" [--no-wait]"
+      local resp; resp="$(api POST "/problems/collection-rename" "$(jq -n --arg n "${ra[0]}" --arg t "${ra[1]}" '{name:$n, to:$t}')")" || exit 1
+      jq -r '"renomeada: \(.from) -> \(.name)" + (if .resumed then "  (RETOMADA de bulk interrompido)" else "" end)' <<<"$resp"
+      if (( nowait )); then echo "  re-tag em segundo plano — acompanhe: moj collection status \"${ra[1]}\""
+      else _retag_wait "$(jq -r '.retag_job // empty' <<<"$resp")"; fi;;
+    delete|del) local nowait=0 da=() a2
+      for a2 in "$@"; do case "$a2" in --no-wait) nowait=1;; *) da+=("$a2");; esac; done
+      [[ ${#da[@]} -ge 1 ]] || die "uso: moj collection delete \"<nome>\" [--no-wait]"
+      local resp; resp="$(api POST "/problems/collection-delete" "$(jq -n --arg n "${da[*]}" '{name:$n}')")" || exit 1
+      jq -r '"excluída: \(.name) (untag em segundo plano; some do registro ao FINAL do re-tag)"' <<<"$resp"
+      (( nowait )) || _retag_wait "$(jq -r '.retag_job // empty' <<<"$resp")";;
+    status|jobs) local q="${1:-}" qs=""
+      if [[ -n "$q" ]]; then [[ "$q" == rt* ]] && qs="?job=$(enc "$q")" || qs="?name=$(enc "$q")"; fi
+      api GET "/problems/collection-retag-status$qs" | jq -r '.jobs[]? |
+        "  \(.id)\t\(.from) -> \(if (.to // "")=="" then "(excluída)" else .to end)\t\(.done // 0)/\(.total // "?")\(if (.failed//0)>0 then "  ⚠\(.failed) falhas" else "" end)\t\(if .finished_at then "concluído" else "RODANDO" end)"' \
+        | { column -t -s$'\t' 2>/dev/null || cat; };;
+    *) die "subcomando de coleção: ls | create | show | add | remove | rename | delete | status";;
   esac; }
 
 # languages = WHITELIST de linguagens de SUBMISSÃO do problema ([]/ausente = todas as padrão).
