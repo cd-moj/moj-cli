@@ -366,10 +366,18 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
   ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
   tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
   [[ "$RAW" == 1 ]] && { jq -cn --argjson v "$vt" --argjson c "$ct" --argjson t "$tt" '{validation:$v, calib:$c, tl:$t}'; return; }
-  local validado calibrado recal miss
+  local validado calibrado recal miss bcal
   validado="$(jq -r 'if (.checks|not) or .status=="unvalidated" then "não validado" elif .ok then "APROVADO" else "REPROVADO" end' <<<"$vt" 2>/dev/null)"
-  calibrado="$(jq -r 'if .calibrated then "sim" else "não" end' <<<"$tt" 2>/dev/null)"
-  recal="$(jq -r 'if .needs_recalibration then "SIM ⚠" else "não" end' <<<"$tt" 2>/dev/null)"
+  # calibração EM VOO (pendente/rodando): o TL ainda vazio é ESPERADO, não falha.
+  # (fallback false: servidor antigo sem o campo => comportamento de antes.)
+  bcal="$(jq -r '.being_calibrated // false' <<<"$tt" 2>/dev/null)"
+  if [[ "$bcal" == true ]]; then
+    calibrado="⏳ aguardando (calibração na fila)"
+    recal="$(jq -r 'if .needs_recalibration then "recalibrando…" else "não" end' <<<"$tt" 2>/dev/null)"
+  else
+    calibrado="$(jq -r 'if .calibrated then "sim" else "não" end' <<<"$tt" 2>/dev/null)"
+    recal="$(jq -r 'if .needs_recalibration then "SIM ⚠" else "não" end' <<<"$tt" 2>/dev/null)"
+  fi
   miss="$(jq -rc '(.missing_langs // [])|join(", ")' <<<"$ct" 2>/dev/null)"
   printf '%s\n  validado: %s   calibrado: %s   precisa recalibrar: %s\n' "$id" "${validado:-?}" "${calibrado:-?}" "${recal:-?}"
   # o PORQUÊ da recalibração: quando calibrou, checksums e os commits que afetam o TL desde então
@@ -379,7 +387,13 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
     jq -r '(.changes // [])[] | "    \(.sha[0:7])  \(.at|strftime("%m-%d %H:%M"))  \(.author)  \(.subject[0:60])"' <<<"$tt" 2>/dev/null
     jq -r 'if ((.changed_files // [])|length) > 0 then "    arquivos: \(.changed_files|join(", "))" else empty end' <<<"$tt" 2>/dev/null
   fi
-  [[ -n "$miss" ]] && printf '  ⚠ REVISAR: solução good SEM TL em [%s] — falhou em TODAS as máquinas de juiz\n' "$miss"
+  # enquanto a calibração está EM VOO, "sem TL" é aguardado — não é falha. Só grita "falhou em
+  # TODAS as máquinas" quando NÃO há calibração pendente (aí é sinal real: calibrou e não obteve TL).
+  if [[ "$bcal" == true ]]; then
+    printf '  ⏳ calibração enfileirada — aguardando um juiz (rode "moj check %s" em ~30s)\n' "$id"
+  elif [[ -n "$miss" ]]; then
+    printf '  ⚠ REVISAR: solução good SEM TL em [%s] — falhou em TODAS as máquinas de juiz\n' "$miss"
+  fi
   echo "  Validação (testado em todos os casos):"
   jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
   echo "  Time limits (máx entre juízes):"
