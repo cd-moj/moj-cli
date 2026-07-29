@@ -173,6 +173,11 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `users ls\|add\|reset\|rm\|disable\|logout <login>\|set-password-all <senha>` | usuários (troca geral pede confirmação) |
 | `sessions` · `dashboard` · `score` · `audit [n]` · `access [dia]` · `news ls\|add\|rm` | operação da prova |
 | `report [arquivo]` | baixa o **relatório estático da prova** (tar.gz navegável offline: placar aberto + enunciados, runs sem código/log, clarifications anônimas, estatísticas, tarefas do staff, infra) |
+| `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|both]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML |
+| `docs get <info\|caderno\|times\|all> [--lang …] [--fmt pdf\|html] [-o arq]` | baixa (a sede usa este: `ls`/`get` funcionam com QUALQUER conta do contest, e só enxergam o que foi **publicado**) |
+| `docs publish <tipo> [--lang pt] [--news]` · `docs unpublish <tipo>` | libera p/ a sede e p/ a seção "Prova" do contest; `--news` cria a notícia com o PDF anexo |
+| `docs cover <capa.pdf> [--lang pt]` · `docs cover --rm` | capa do caderno em **PDF enviado** (vence a editada/gerada) |
+| `docs set caderno_version=v1.2 [errata=…] [cover_note=…]` · `docs text <info\|capa> [--show\|--from arq\|--reset]` | dados e textos editáveis (Markdown com marcadores `{{…}}`) |
 | `remove <cid>` | tira do ar (lixeira; exige `.admin` do treino) |
 
 ## Quem pode criar

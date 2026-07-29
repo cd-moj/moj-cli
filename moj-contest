@@ -29,6 +29,15 @@
 #                       | rm <login> | disable <login> | logout <login> | set-password-all <senha> [--include-disabled]
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
+#   moj-contest -c <cid> docs ls | gen [info|caderno|times…] [--lang pt|en|both]
+#                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
+#                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
+#                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
+#                       | set caderno_version=v1.2 [errata=…] [cover_note=…]
+#                       | text <info|capa> [--lang pt] [--show | --from arq|- | --reset]
+#     (documentos da prova: info sheet, caderno e folha de time limits, em PDF+HTML e pt/en.
+#      `ls`/`get` funcionam com QUALQUER conta do contest — a sede baixa o que foi publicado;
+#      gerar/publicar/capa exigem .admin ou .cjudge. O caderno não publicado é 404 p/ os demais.)
 #   moj-contest remove <cid>             (tira do ar; exige .admin do TREINO)
 # Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host p/ dev). Saída crua: --json.
 set -euo pipefail
@@ -314,6 +323,129 @@ cmd_news(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     *) die "news: sub desconhecido '$sub' (ls|add|rm)";;
   esac; }
 
+# ---- documentos da prova (info sheet, caderno, folha de time limits) -----------------------
+# `ls`/`get` valem p/ QUALQUER conta do contest (a sede baixa o que foi publicado; o gate é do
+# servidor). O resto exige sessão .admin ou .cjudge — a API corta o que o login não pode.
+_doc_type(){ case "$1" in
+    info|info-sheet|ambiente) printf 'info-sheet';;
+    caderno|contest|prova|problemset) printf 'contest';;
+    times|tl|tempos) printf 'times';;
+    *) die "tipo desconhecido: $1 (info | caderno | times)";;
+  esac; }
+_doc_lang(){ case "$1" in pt|PT) printf pt;; en|EN) printf en;; *) die "lang deve ser pt ou en";; esac; }
+cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      local r; r="$(api GET "/contest/doc$(qc)")"
+      [[ "$(jq -r '(.docs|length)' <<<"$r" 2>/dev/null)" == 0 ]] && \
+        echo "(nenhum documento $(jq -e '.can_manage' <<<"$r" >/dev/null 2>&1 && echo gerado || echo publicado) ainda)" >&2
+      printf '%s' "$r" | out '.docs[]? |
+        "\(.type)\t\(.lang)\tPDF \((.pdf_bytes/1024|floor))KB\tHTML \((.html_bytes/1024|floor))KB\t\(.generated_at|todate)\t\(if .published then "publicado" else "" end)"' \
+        | { column -t -s$'\t' 2>/dev/null || cat; };;
+    gen|generate)
+      local types='[]' langs='["pt","en"]' a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --lang) [[ "$1" == both || "$1" == ambos ]] && langs='["pt","en"]' || langs="$(jq -cn --arg l "$(_doc_lang "$1")" '[$l]')"; shift;;
+          -*) die "opção desconhecida: $a";;
+          *) types="$(jq -c --arg t "$(_doc_type "$a")" '. + [$t]' <<<"$types")";;
+        esac
+      done
+      [[ "$types" == '[]' ]] && types='["info-sheet","contest","times"]'
+      echo "gerando (converter PDF leva alguns segundos)…" >&2
+      api POST "/contest/admin/docs$(qc)" "$(jq -cn --argjson t "$types" --argjson l "$langs" '{action:"generate",types:$t,langs:$l}')" \
+        | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang)|join(", ")))" else "" end)"';;
+    get|download)
+      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|all> [--lang pt|en|both] [--fmt pdf|html] [-o arquivo]"
+      local what="$1" fmt=pdf outf="" langs=(pt) a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --lang) if [[ "$1" == both || "$1" == ambos ]]; then langs=(pt en); else langs=("$(_doc_lang "$1")"); fi; shift;;
+          --fmt) [[ "$1" == pdf || "$1" == html ]] || die "fmt deve ser pdf ou html"; fmt="$1"; shift;;
+          -o|--out) outf="$1"; shift;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      local types=() t l f
+      if [[ "$what" == all || "$what" == todos ]]; then types=(info-sheet contest times)
+      else types=("$(_doc_type "$what")"); fi
+      [[ -n "$outf" && ( ${#types[@]} -gt 1 || ${#langs[@]} -gt 1 ) ]] && die "-o só com UM tipo e UM idioma"
+      # em lote, documento ausente (não gerado/não publicado — a sede só vê o publicado) é
+      # AVISO e segue; pedindo UM arquivo específico, o erro da API vale (subshell contém o die)
+      local lote=0; (( ${#types[@]} > 1 || ${#langs[@]} > 1 )) && lote=1
+      for t in "${types[@]}"; do for l in "${langs[@]}"; do
+        f="${outf:-$CONTEST-$t.$l.$fmt}"
+        if (( lote )); then
+          if ( api_get_to_file "/contest/doc$(qc)&type=$(enc "$t")&lang=$(enc "$l")&fmt=$(enc "$fmt")" "$f" ) 2>/dev/null; then
+            echo "$f ($(wc -c <"$f" | tr -d '[:space:]') bytes)"
+          else echo "$t.$l: indisponível (não gerado, ou não publicado p/ o seu login)" >&2; fi
+        else
+          api_get_to_file "/contest/doc$(qc)&type=$(enc "$t")&lang=$(enc "$l")&fmt=$(enc "$fmt")" "$f"
+          echo "$f ($(wc -c <"$f" | tr -d '[:space:]') bytes)"
+        fi
+      done; done;;
+    publish|unpublish)
+      [[ $# -ge 1 ]] || die "uso: docs $sub <info|caderno|times> [--lang pt|en] [--news]"
+      local t; t="$(_doc_type "$1")"; shift
+      local l=pt news=false a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in --lang) l="$(_doc_lang "$1")"; shift;; --news|--noticia) news=true;; *) die "opção desconhecida: $a";; esac
+      done
+      api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg a "$sub" --arg t "$t" --arg l "$l" --argjson n "$news" \
+        '{action:$a,type:$t,lang:$l} + (if $a=="publish" then {news:$n} else {} end)')" \
+        | out '"ok — publicados: \(if ((.published//[])|length)>0 then (.published|join(", ")) else "(nenhum)" end)\(if .news then "  + notícia criada" else "" end)"';;
+    cover|capa)
+      # docs cover <arquivo.pdf> [--lang pt]   |   docs cover --rm [--lang pt]
+      local file="" rm=0 l=pt a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in --lang) l="$(_doc_lang "$1")"; shift;; --rm|--remove) rm=1;; -*) die "opção desconhecida: $a";; *) file="$a";; esac
+      done
+      if [[ "$rm" == 1 ]]; then
+        api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg l "$l" '{action:"cover",lang:$l,remove:true}')" | out '"capa removida ('"$l"')"'
+      else
+        [[ -f "$file" ]] || die "uso: docs cover <arquivo.pdf> [--lang pt]   (ou --rm)"
+        local tmp; tmp="$(mktemp)"
+        jq -cn --arg l "$l" --arg b "$(_b64enc "$file")" '{action:"cover",lang:$l,pdf_b64:$b}' > "$tmp"
+        api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"capa enviada ('"$l"'): \(.bytes) bytes — gere o caderno de novo"'
+        rm -f "$tmp"
+      fi;;
+    set)
+      [[ $# -ge 1 ]] || die "uso: docs set caderno_version=v1.2 [errata=…] [cover_note=…]"
+      local body='{}' kv k v
+      for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"; [[ "$k" != "$kv" ]] || die "esperado k=v: $kv"
+        case "$k" in
+          caderno_version|errata|cover_note) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
+          *) die "campo desconhecido: $k (caderno_version|errata|cover_note)";;
+        esac
+      done
+      api POST "/contest/admin/docs$(qc)" "$(jq -c '. + {action:"config"}' <<<"$body")" | out '"salvo"';;
+    text|texto)
+      # docs text <info|capa> [--lang pt] [--show | --from <arquivo>|- | --reset]
+      [[ $# -ge 1 ]] || die "uso: docs text <info|capa> [--lang pt] [--show | --from <arq>|- | --reset]"
+      local which="$1" l=pt mode=show src="" a; shift
+      case "$which" in info|info-sheet) which=info_sheet;; capa|cover) which=cover;; *) die "docs text: use 'info' ou 'capa'";; esac
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --lang) l="$(_doc_lang "$1")"; shift;;
+          --show) mode=show;;
+          --reset) mode=reset;;
+          --from) mode=set; src="$1"; shift;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      local key="${which}_${l}"
+      case "$mode" in
+        show) api GET "/contest/admin/docs$(qc)" | jq -r --arg k "$key" '.templates[$k] // ""';;
+        reset) api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg k "$key" '{action:"config"} + {($k):""}')" | out '"texto '"$key"' voltou ao padrão"';;
+        set) local txt tmp
+          if [[ "$src" == - ]]; then txt="$(cat)"; else [[ -f "$src" ]] || die "arquivo não existe: $src"; txt="$(cat "$src")"; fi
+          tmp="$(mktemp)"; jq -cn --arg k "$key" --arg v "$txt" '{action:"config"} + {($k):$v}' > "$tmp"
+          api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"texto '"$key"' salvo"'; rm -f "$tmp";;
+      esac;;
+    *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|set|text)";;
+  esac; }
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
@@ -325,6 +457,7 @@ case "$cmd" in
   sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
   report) cmd_report "$@";;
   audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
-  help|-h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//';;
+  docs|doc|documentos) cmd_docs "$@";;
+  help|-h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
 esac
