@@ -30,7 +30,8 @@
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
-#                       [--freeze <…>] [--kind warmup|official|extra] | set <slug> …
+#                       [--freeze <…>] [--kind warmup|official|extra]
+#                       | set <slug> [--slug <novo>] [--name N] [--start …] [--end …] [--freeze …] [--kind …]
 #                       | problems <slug> [ls|set <id,id…>|add <id>|rm <letra>]
 #                       | promote [--force] | publish <slug> | unpublish <slug> | rm <slug>
 #                       | archive <slug> [arq.tar.gz]
@@ -510,6 +511,7 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         case "$a" in
           --name) body="$(jq -c --arg v "$1" '.name=$v' <<<"$body")"; shift;;
           --kind) body="$(jq -c --arg v "$1" '.kind=$v' <<<"$body")"; shift;;
+          --slug|--rename) body="$(jq -c --arg v "$1" '.new_slug=$v' <<<"$body")"; shift;;
           --start)  body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.start=$v'  <<<"$body")"; shift;;
           --end)    body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.end=$v'    <<<"$body")"; shift;;
           --freeze) body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.freeze=$v' <<<"$body")"; shift;;
