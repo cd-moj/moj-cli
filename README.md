@@ -173,6 +173,11 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `users ls\|add\|reset\|rm\|disable\|logout <login>\|set-password-all <senha>` | usuários (troca geral pede confirmação) |
 | `sessions` · `dashboard` · `score` · `audit [n]` · `access [dia]` · `news ls\|add\|rm` | operação da prova |
 | `report [arquivo]` | baixa o **relatório estático da prova** (tar.gz navegável offline: placar aberto + enunciados, runs sem código/log, clarifications anônimas, estatísticas, tarefas do staff, infra) |
+| `rounds ls` · `rounds add <slug> --name N --start … --end … [--kind warmup]` · `rounds set` | **rodadas**: aquecimento (dress rehearsal) e prova oficial no MESMO contest — mesma URL, mesmo login, config intacta. Datas aceitam epoch, `+90m`/`+2h` ou `"AAAA-MM-DD HH:MM"` |
+| `rounds problems <slug> [ls\|set <id,id…>\|add <id>\|rm <letra>]` | a lista de problemas de cada rodada (entra no ar quando a rodada é promovida) |
+| `rounds promote [--force]` | **arquiva** a rodada no ar (submissões, veredictos, placar e logs ficam guardados para auditoria) e coloca a próxima no ar. Recusa com job em voo / veredicto pendente / review aberto — `rounds ls` lista os bloqueadores; pede o id do contest para confirmar |
+| `rounds publish\|unpublish <slug>` · `rounds archive <slug> [arq]` | libera o placar da rodada arquivada p/ os times · baixa o arquivo bruto (com código-fonte) |
+| `machines [--round <slug>] [--csv]` | **time × IP × User-Agent** da rodada: é no aquecimento que os times ligam as máquinas. Marca quem trocou de máquina depois e sugere a substring comum p/ o gate de navegador |
 | `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|both]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML |
 | `docs get <info\|caderno\|times\|all> [--lang …] [--fmt pdf\|html] [-o arq]` | baixa (a sede usa este: `ls`/`get` funcionam com QUALQUER conta do contest, e só enxergam o que foi **publicado**) |
 | `docs publish <tipo> [--lang pt] [--news]` · `docs unpublish <tipo>` | libera p/ a sede e p/ a seção "Prova" do contest; `--news` cria a notícia com o PDF anexo |

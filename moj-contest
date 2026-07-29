@@ -29,6 +29,17 @@
 #                       | rm <login> | disable <login> | logout <login> | set-password-all <senha> [--include-disabled]
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
+#   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
+#                       [--freeze <…>] [--kind warmup|official|extra] | set <slug> …
+#                       | problems <slug> [ls|set <id,id…>|add <id>|rm <letra>]
+#                       | promote [--force] | publish <slug> | unpublish <slug> | rm <slug>
+#                       | archive <slug> [arq.tar.gz]
+#     (AQUECIMENTO e prova oficial no MESMO contest: mesma URL, mesmo login, config intacta.
+#      Promover ARQUIVA a rodada no ar — submissões, veredictos, placar e logs ficam guardados
+#      para auditoria — e coloca a janela + os problemas da próxima no ar. Recusa se houver job
+#      em voo, veredicto pendente ou review aberto; `rounds ls` mostra os bloqueadores.)
+#   moj-contest -c <cid> machines [--round <slug>] [--csv]
+#     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times…] [--lang pt|en|both]
 #                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
@@ -446,6 +457,141 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|set|text)";;
   esac; }
 
+# ---- rodadas (aquecimento -> prova oficial no MESMO contest) --------------------------------
+# `ls` vale p/ qualquer conta do contest (a sede acompanha); o resto exige .admin.
+_rd_epoch(){ # aceita epoch, "+90m"/"+2h" (a partir de agora) ou "YYYY-MM-DD HH:MM"
+  local v="$1"
+  case "$v" in
+    ''|0) printf 0;;
+    +*m) printf '%s' $(( $(date +%s) + ${v#+} * 60 ));;
+    +*h) printf '%s' $(( $(date +%s) + ${v%h} * 3600 ));;
+    *[0-9]) [[ "$v" =~ ^[0-9]{9,}$ ]] && printf '%s' "$v" || date -d "$v" +%s 2>/dev/null || die "data inválida: $v";;
+    *) die "data inválida: $v";;
+  esac
+}
+cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      api GET "/contest/admin/rounds$(qc)" > /tmp/.moj-rd.$$ 2>/dev/null \
+        || { api GET "/contest/rounds$(qc)" | out '.rounds[]? |
+               "\(.slug)\t\(.state)\t\(.kind//"")\t\(.name)"' | { column -t -s$'\t' 2>/dev/null || cat; }; return 0; }
+      out '.rounds[]? | "\(.slug)\t\(.state)\t\(.kind//"")\t\((.start//0)|if .>0 then (.|todate) else "-" end)\t\((.end//0)|if .>0 then (.|todate) else "-" end)\t\((.problems//[])|length) prob\t\(.name)\(if .published then "\tPUBLICADA" else "" end)"' \
+        < /tmp/.moj-rd.$$ | { column -t -s$'\t' 2>/dev/null || cat; }
+      local pr; pr="$(jq -c '.promote_ready // {}' /tmp/.moj-rd.$$ 2>/dev/null)"
+      if [[ -n "$pr" && "$pr" != '{}' ]]; then
+        if [[ "$(jq -r '.ok' <<<"$pr")" == true ]]; then
+          echo "próxima: $(jq -r '.next // "(nenhuma)"' /tmp/.moj-rd.$$) — pronta p/ promover" >&2
+        else
+          echo "próxima: $(jq -r '.next // "(nenhuma)"' /tmp/.moj-rd.$$) — BLOQUEADA:" >&2
+          jq -r '.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$pr" >&2
+        fi
+      fi
+      rm -f /tmp/.moj-rd.$$;;
+    add)
+      [[ $# -ge 1 ]] || die "uso: rounds add <slug> --name N --start <epoch|+90m|'AAAA-MM-DD HH:MM'> --end <…> [--freeze <…>] [--kind warmup|official|extra]"
+      local slug="$1" nm="" st=0 en=0 fz=0 kd=official a; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --name) nm="$1"; shift;; --kind) kd="$1"; shift;;
+          --start) st="$(_rd_epoch "$1")"; shift;; --end) en="$(_rd_epoch "$1")"; shift;;
+          --freeze) fz="$(_rd_epoch "$1")"; shift;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg s "$slug" --arg n "${nm:-$slug}" --arg k "$kd" \
+        --argjson st "$st" --argjson en "$en" --argjson fz "$fz" \
+        '{action:"add",slug:$s,name:$n,kind:$k,start:$st,end:$en,freeze:$fz}')" \
+        | out '"criada: '"$slug"'"';;
+    set)
+      [[ $# -ge 1 ]] || die "uso: rounds set <slug> [--name N] [--start …] [--end …] [--freeze …] [--kind …]"
+      local slug="$1" body a; shift
+      body="$(jq -cn --arg s "$slug" '{action:"set",slug:$s}')"
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --name) body="$(jq -c --arg v "$1" '.name=$v' <<<"$body")"; shift;;
+          --kind) body="$(jq -c --arg v "$1" '.kind=$v' <<<"$body")"; shift;;
+          --start)  body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.start=$v'  <<<"$body")"; shift;;
+          --end)    body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.end=$v'    <<<"$body")"; shift;;
+          --freeze) body="$(jq -c --argjson v "$(_rd_epoch "$1")" '.freeze=$v' <<<"$body")"; shift;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      api POST "/contest/admin/rounds$(qc)" "$body" | out '"ok: \(.round.slug) \((.round.start)|todate) -> \((.round.end)|todate)"';;
+    problems|probs)
+      [[ $# -ge 1 ]] || die "uso: rounds problems <slug> [ls] | <slug> set <id>[,<id>…] | <slug> add <id> | <slug> rm <letra>"
+      local slug="$1" op="${2:-ls}"; shift || true; shift || true
+      local cur; cur="$(api GET "/contest/admin/rounds$(qc)" | jq -c --arg s "$slug" '(.rounds[]?|select(.slug==$s)|.problems) // []')"
+      [[ -n "$cur" ]] || die "rodada '$slug' não encontrada"
+      case "$op" in
+        ls) jq -r '.[] | "\(.letter // "?")\t\(.name // "")\t\(.bank_id // .problem_id // "")"' <<<"$cur" \
+              | { column -t -s$'\t' 2>/dev/null || cat; }; return 0;;
+        set) [[ $# -ge 1 ]] || die "uso: rounds problems <slug> set <id>[,<id>…]"
+             cur="$(jq -cn --arg v "$1" '$v | split(",") | map(select(length>0)) | to_entries
+                    | map({bank_id:.value, letter:([65+.key]|implode)})')";;
+        add) [[ $# -ge 1 ]] || die "uso: rounds problems <slug> add <id>"
+             cur="$(jq -c --arg id "$1" '. + [{bank_id:$id}]' <<<"$cur")";;
+        rm)  [[ $# -ge 1 ]] || die "uso: rounds problems <slug> rm <letra>"
+             cur="$(jq -c --arg l "$1" '[ .[] | select((.letter // "") != $l) ]' <<<"$cur")";;
+        *) die "rounds problems: use ls|set|add|rm";;
+      esac
+      local tmp; tmp="$(mktemp)"
+      jq -cn --arg s "$slug" --argjson p "$cur" '{action:"problems",slug:$s,problems:$p}' > "$tmp"
+      api_post_file "/contest/admin/rounds$(qc)" "$tmp" | out '"ok: \(.n) problema(s) na rodada '"$slug"'"'
+      rm -f "$tmp";;
+    promote)
+      local force=false a
+      for a in "$@"; do [[ "$a" == --force ]] && force=true; done
+      local st; st="$(api GET "/contest/admin/rounds$(qc)")"
+      local to; to="$(jq -r '.next // ""' <<<"$st")"
+      [[ -n "$to" ]] || die "nenhuma rodada planejada: crie com 'rounds add <slug> …' antes"
+      if [[ "$(jq -r '.promote_ready.ok' <<<"$st")" != true && "$force" != true ]]; then
+        echo "a rodada no ar NÃO está pronta p/ ser promovida:" >&2
+        jq -r '.promote_ready.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$st" >&2
+        die "resolva os bloqueadores (ou use --force, que arquiva do mesmo jeito)"
+      fi
+      echo "isto ARQUIVA a rodada '$(jq -r '.active' <<<"$st")' e ZERA o placar; '$to' entra no ar." >&2
+      local c; read -rp "confirme digitando o id do contest ($CONTEST): " c || true
+      [[ "$c" == "$CONTEST" ]] || die "não confere — nada foi alterado."
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg t "$to" --argjson f "$force" '{action:"promote",to:$t,force:$f}')" \
+        | out '"promovida: \(.from) -> \(.to)  (arquivadas \(.archived.submissions) submissões de \(.archived.users) contas)"';;
+    publish|unpublish)
+      [[ $# -ge 1 ]] || die "uso: rounds $sub <slug>"
+      local on=true; [[ "$sub" == unpublish ]] && on=false
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg s "$1" --argjson on "$on" '{action:"publish",slug:$s,on:$on}')" \
+        | out '"publicada: \(.published)"';;
+    rm|remove)
+      [[ $# -ge 1 ]] || die "uso: rounds rm <slug>   (só rodada planejada)"
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg s "$1" '{action:"remove",slug:$s}')" | out '"removida"';;
+    archive|get)
+      [[ $# -ge 1 ]] || die "uso: rounds archive <slug> [arquivo.tar.gz]"
+      local slug="$1" outf="${2:-}"; [[ -n "$outf" ]] || outf="$CONTEST-$slug.tar.gz"
+      api_get_to_file "/contest/admin/round-archive$(qc)&round=$(enc "$slug")" "$outf"
+      echo "$outf ($(wc -c <"$outf" | tr -d '[:space:]') bytes) — inclui código-fonte e logs da rodada";;
+    *) die "rounds: sub desconhecido '$sub' (ls|add|set|problems|promote|publish|unpublish|rm|archive)";;
+  esac; }
+
+# ---- máquinas (time x IP x User-Agent da rodada) --------------------------------------------
+cmd_machines(){ need_contest; need_login
+  local round="" csv=0 a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in --round) round="$1"; shift;; --csv) csv=1;; *) die "opção desconhecida: $a";; esac
+  done
+  local r; r="$(api GET "/contest/admin/machines$(qc)$([[ -n "$round" ]] && printf '&round=%s' "$(enc "$round")")")"
+  if [[ "$RAW" == 1 ]]; then printf '%s\n' "$r"; return 0; fi
+  if (( csv )); then
+    printf 'login,time,sede,ip,user_agent,logins,primeiro,ultimo,trocou\n'
+    jq -r '.by_login[]? as $u | $u.pairs[]? |
+      [$u.login,$u.name,$u.region,.ip,.ua,(.n|tostring),(.first|todate),(.last|todate),
+       (if $u.changed then "sim" else "" end)] | @csv' <<<"$r"
+    return 0
+  fi
+  jq -r '"rodada \(.round) · \(.totals.logins) conta(s) · \(.totals.ips) IP(s) · \(.totals.changed) trocaram de máquina · \(.totals.shared_ips) IP(s) compartilhado(s)"' <<<"$r" >&2
+  jq -r '.by_login[]? | "\(.login)\t\(.name)\t\(.region // "-")\t\((.ips//[])|join(","))\t\((.uas//[])|length) UA\(if .changed then "\tTROCOU" elif .multi_ip then "\t~multi-ip" else "" end)"' <<<"$r" \
+    | { column -t -s$'\t' 2>/dev/null || cat; }
+  local sug; sug="$(jq -r '.ua_suggestion // ""' <<<"$r")"
+  [[ -n "$sug" ]] && echo "substring comum dos navegadores (candidata ao gate): $sug" >&2
+  return 0; }
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
@@ -458,6 +604,8 @@ case "$cmd" in
   report) cmd_report "$@";;
   audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
   docs|doc|documentos) cmd_docs "$@";;
-  help|-h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//';;
+  rounds|rodadas|round) cmd_rounds "$@";;
+  machines|maquinas) cmd_machines "$@";;
+  help|-h|--help) sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
 esac
