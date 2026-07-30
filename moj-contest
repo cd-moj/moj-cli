@@ -39,6 +39,12 @@
 #      Promover ARQUIVA a rodada no ar — submissões, veredictos, placar e logs ficam guardados
 #      para auditoria — e coloca a janela + os problemas da próxima no ar. Recusa se houver job
 #      em voo, veredicto pendente ou review aberto; `rounds ls` mostra os bloqueadores.)
+#   moj-contest -c <cid> cohorts ls | add <id> [--name N] [--regex R] [--private] [--unranked]
+#                       [--sees a,b] [--default] | set <id> … | rm <id>
+#                       | assign <login> <coorte> | materialize | release [on|off]
+#     (COORTES de placar: times oficiais × CONVIDADOS. Coorte privada não aparece no placar
+#      público e os times regulares não a veem; os convidados veem todos. `--unranked` = entra
+#      intercalado sem consumir posição oficial. `release` é o "liberamos tudo".)
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times…] [--lang pt|en|both]
@@ -594,6 +600,58 @@ cmd_machines(){ need_contest; need_login
   [[ -n "$sug" ]] && echo "substring comum dos navegadores (candidata ao gate): $sug" >&2
   return 0; }
 
+# ---- coortes de placar (times oficiais × convidados) ---------------------------------------
+cmd_cohorts(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      local r; r="$(api GET "/contest/admin/cohorts$(qc)")"
+      if [[ "$RAW" == 1 ]]; then printf '%s\n' "$r"; return 0; fi
+      jq -r '.cohorts[]? | "\(.id)\t\(if .public then "pública" else "PRIVADA" end)\t\(if .unranked then "extra-oficial" else "classifica" end)\t\(.regex // "-")\t\(.name)"' <<<"$r" \
+        | { column -t -s$'\t' 2>/dev/null || cat; }
+      jq -r '"times por coorte: " + ([.counts // {} | to_entries[] | "\(.key)=\(.value)"] | join("  "))
+             + (if .results_released then "   [RESULTADOS LIBERADOS]" else "" end)' <<<"$r" >&2
+      local nb; nb="$(jq -r '(.by_regex_only // []) | length' <<<"$r")"
+      (( nb > 0 )) && echo "$nb time(s) só por regex (use 'cohorts materialize' p/ carimbar)" >&2
+      return 0;;
+    add|set)
+      [[ $# -ge 1 ]] || die "uso: cohorts $sub <id> [--name N] [--regex R] [--private|--public] [--unranked|--ranked] [--sees a,b] [--default]"
+      local id="$1" body a; shift
+      body="$(jq -cn --arg a "$sub" --arg i "$id" '{action:$a, id:$i}')"
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --name)  body="$(jq -c --arg v "$1" '.name=$v' <<<"$body")"; shift;;
+          --regex) body="$(jq -c --arg v "$1" '.regex=$v' <<<"$body")"; shift;;
+          --sees)  body="$(jq -c --arg v "$1" '.sees=($v|split(",")|map(select(length>0)))' <<<"$body")"; shift;;
+          --private)  body="$(jq -c '.public=false' <<<"$body")";;
+          --public)   body="$(jq -c '.public=true'  <<<"$body")";;
+          --unranked) body="$(jq -c '.unranked=true' <<<"$body")";;
+          --ranked)   body="$(jq -c '.unranked=false' <<<"$body")";;
+          --default)  body="$(jq -c '.default=true' <<<"$body")";;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      api POST "/contest/admin/cohorts$(qc)" "$body" | out '"ok: \([.cohorts[].id] | join(", "))"';;
+    rm|remove)
+      [[ $# -ge 1 ]] || die "uso: cohorts rm <id>   (a default não sai; coorte com time dá 409)"
+      api POST "/contest/admin/cohorts$(qc)" "$(jq -cn --arg i "$1" '{action:"rm",id:$i}')" | out '"removida"';;
+    assign)
+      [[ $# -ge 1 ]] || die "uso: cohorts assign <login> <coorte>   (coorte vazia = volta p/ a regra)"
+      api POST "/contest/admin/cohorts$(qc)" "$(jq -cn --arg l "$1" --arg c "${2:-}" '{action:"assign",login:$l,cohort:$c}')" \
+        | out '"\(.login) -> \(if .cohort == "" then "(regra)" else .cohort end)"';;
+    materialize)
+      api POST "/contest/admin/cohorts$(qc)" '{"action":"materialize"}' | out '"carimbados: \(.materialized)"';;
+    release)
+      local on=true; [[ "${1:-on}" == off ]] && on=false
+      if [[ "$on" == true ]]; then
+        echo "isto LIBERA os resultados: todos os times passam a ver todos (inclusive convidados)." >&2
+        local c; read -rp "confirme digitando o id do contest ($CONTEST): " c || true
+        [[ "$c" == "$CONTEST" ]] || die "não confere — nada foi alterado."
+      fi
+      api POST "/contest/admin/cohorts$(qc)" "$(jq -cn --argjson on "$on" '{action:"release",on:$on}')" \
+        | out '"resultados liberados: \(.results_released)"';;
+    *) die "cohorts: sub desconhecido '$sub' (ls|add|set|rm|assign|materialize|release)";;
+  esac; }
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
@@ -607,7 +665,8 @@ case "$cmd" in
   audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
   docs|doc|documentos) cmd_docs "$@";;
   rounds|rodadas|round) cmd_rounds "$@";;
+  cohorts|coortes) cmd_cohorts "$@";;
   machines|maquinas) cmd_machines "$@";;
-  help|-h|--help) sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,61p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
 esac
