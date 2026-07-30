@@ -45,6 +45,14 @@
 #     (COORTES de placar: times oficiais × CONVIDADOS. Coorte privada não aparece no placar
 #      público e os times regulares não a veem; os convidados veem todos. `--unranked` = entra
 #      intercalado sem consumir posição oficial. `release` é o "liberamos tudo".)
+#   moj-contest -c <cid> ua-gate show | check <login>
+#                       | set [--mode enforce|off] [--from-login REGEX --expect '\1']
+#                         [--region 'Sede=substring']… [--regex 'REGEX=substring']…
+#                         [--exempt REGEX]… [--fallback S]
+#     (GATE DE NAVEGADOR POR SEDE: a imagem de cada sede manda um UA com um pedaço do login do
+#      time — teambrspso001 -> "brspso". `--from-login` cobre todas as sedes de uma vez;
+#      `--region` é o override de sede com imagem fora do padrão; `--exempt` é a margem.
+#      `check` diz o esperado de um time sem ele precisar logar.)
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times…] [--lang pt|en|both]
@@ -652,6 +660,49 @@ cmd_cohorts(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     *) die "cohorts: sub desconhecido '$sub' (ls|add|set|rm|assign|materialize|release)";;
   esac; }
 
+# ---- gate de navegador por sede ------------------------------------------------------------
+cmd_ua_gate(){ need_contest; need_login; local sub="${1:-show}"; shift || true
+  case "$sub" in
+    show|get)
+      local r; r="$(api GET "/contest/admin/ua-gate$(qc)")"
+      if [[ "$RAW" == 1 ]]; then printf '%s\n' "$r"; return 0; fi
+      jq -r '.gate | "modo: \(.mode)",
+        "do login: " + (if .from_login == null then "(nenhuma)" else "\(.from_login.regex)  ->  \(.from_login.expect)" end),
+        "por sede: " + (if (.by_region|length) == 0 then "(nenhuma)" else ([.by_region | to_entries[] | "\(.key)=\(.value)"] | join("  ")) end),
+        "por regex: " + (if (.by_regex|length) == 0 then "(nenhuma)" else ([.by_regex[] | "\(.regex)->\(.expect)"] | join("  ")) end),
+        "isentos: " + (if (.exempt|length) == 0 then "(nenhum)" else (.exempt|join("  ")) end),
+        "fallback: " + (if (.fallback // "") == "" then "(nenhum)" else .fallback end)' <<<"$r"
+      local lg; lg="$(jq -r '.legacy // ""' <<<"$r")"
+      [[ -n "$lg" ]] && echo "LOGIN_UA_SUBSTRING (legado, usado quando nada acima casa): $lg" >&2
+      return 0;;
+    set)
+      local body='{"action":"set"}' a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in
+          --mode) body="$(jq -c --arg v "$1" '.mode=$v' <<<"$body")"; shift;;
+          --from-login) body="$(jq -c --arg v "$1" '.from_login=((.from_login // {}) + {regex:$v})' <<<"$body")"; shift;;
+          --expect) body="$(jq -c --arg v "$1" '.from_login=((.from_login // {}) + {expect:$v})' <<<"$body")"; shift;;
+          --no-from-login) body="$(jq -c '.from_login=null' <<<"$body")";;
+          --region) # --region 'Sede=substring' (repetível)
+            [[ "$1" == *=* ]] || die "use --region 'Sede=substring'"
+            body="$(jq -c --arg k "${1%%=*}" --arg v "${1#*=}" '.by_region=((.by_region // {}) + {($k):$v})' <<<"$body")"; shift;;
+          --regex) # --regex 'REGEX=substring' (repetível)
+            [[ "$1" == *=* ]] || die "use --regex 'REGEX=substring'"
+            body="$(jq -c --arg k "${1%%=*}" --arg v "${1#*=}" '.by_regex=((.by_regex // []) + [{regex:$k, expect:$v}])' <<<"$body")"; shift;;
+          --exempt) body="$(jq -c --arg v "$1" '.exempt=((.exempt // []) + [$v])' <<<"$body")"; shift;;
+          --fallback) body="$(jq -c --arg v "$1" '.fallback=$v' <<<"$body")"; shift;;
+          *) die "opção desconhecida: $a";;
+        esac
+      done
+      # --region/--regex/--exempt SUBSTITUEM a lista inteira: junte o que já existe se quiser somar
+      api POST "/contest/admin/ua-gate$(qc)" "$body" | out '"ok: modo \(.gate.mode), \(.gate.by_region|length) sede(s), \(.gate.exempt|length) isento(s)"';;
+    check)
+      [[ $# -ge 1 ]] || die "uso: ua-gate check <login>"
+      api GET "/contest/admin/ua-gate$(qc)&login=$(enc "$1")" \
+        | out '.check | "\(.login): \(if .gated then "espera \"" + .expected + "\"" else "SEM GATE (isento/papel/sem regra)" end)\(if .region != "" then "  [sede: " + .region + "]" else "" end)"';;
+    *) die "ua-gate: sub desconhecido '$sub' (show|set|check)";;
+  esac; }
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
@@ -666,7 +717,8 @@ case "$cmd" in
   docs|doc|documentos) cmd_docs "$@";;
   rounds|rodadas|round) cmd_rounds "$@";;
   cohorts|coortes) cmd_cohorts "$@";;
+  ua-gate|uagate) cmd_ua_gate "$@";;
   machines|maquinas) cmd_machines "$@";;
-  help|-h|--help) sed -n '2,61p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
 esac
