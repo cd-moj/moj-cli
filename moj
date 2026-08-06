@@ -430,8 +430,16 @@ cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
   jq -r '"exemplos: \(.examples|length)  testes ocultos: \(.tests|length)\nsoluções: " + ([.sols|to_entries[]|"\(.key):\(.value|length)"]|join(" · "))' "$st" 2>/dev/null || true
   rm -f "$gt" "$st"; }
 
-cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <org> <prob>"
-  local repo="$1" prob="$2" d="$2"; [[ -e "$d" ]] && die "já existe ./$d"
+cmd_new(){ need_login; [[ $# -ge 2 ]] || die "uso: moj new <org> <prob>   (prob = slug MINÚSCULO: [a-z0-9._-])"
+  local repo="$1" prob="$2" d="$2"
+  # as MESMAS regras do servidor (problems/create): pegar o slug inválido AQUI, não no push
+  [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$ ]] || die "org inválida: '$repo' (regra: [A-Za-z0-9._-], 2-64 chars)"
+  if [[ ! "$prob" =~ ^[a-z0-9][a-z0-9._-]{1,80}$ ]]; then
+    local sug; sug="$(printf '%s' "$prob" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9._-')"
+    die "nome de problema inválido: '$prob' — o slug é MINÚSCULO ([a-z0-9._-], 2-81 chars).
+  Sugestão: moj new $repo $sug"
+  fi
+  [[ -e "$d" ]] && die "já existe ./$d"
   local me; me="$(api GET "/auth/status?contest=$CONTEST" | jq -r '.name // .login // ""')"
   local tmpl; tmpl="$(jq -n --arg a "$me" '{title:"Título do Problema", author:$a, tags:["iniciante"], collections:[], public:false,
     enunciado_md:"Descreva o problema.\n\n## Entrada\n\nDescreva a entrada.\n\n## Saída\n\nDescreva a saída.\n\n## Observações\n\nRestrições e limites.\n",
@@ -623,6 +631,17 @@ cmd_push(){ need_login
   [[ "$id" == "$repo#$prob" ]] || die "o .moj-id está inconsistente: id='$id' mas repo='$repo' e prob='$prob'.
   O id é a IDENTIDADE do problema (não edite id/repo/prob à mão).
   Para mudar o TÍTULO exibido, edite o campo \"title\" do .moj-id; para mudar de org, use 'moj mv'."
+  # slug com as MESMAS regras do servidor: um prob com MAIÚSCULA/char inválido morre no
+  # /problems/create com 400 — e o fallback antigo ainda mascarava isso de "Problema não
+  # existe (404)". Como o servidor nunca aceitou um slug assim, o problema não existe lá:
+  # ajustar o .moj-id é seguro.
+  if [[ ! "$prob" =~ ^[a-z0-9][a-z0-9._-]{1,80}$ ]]; then
+    local sug; sug="$(printf '%s' "$prob" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9._-')"
+    die "nome de problema inválido: '$prob' — o slug é MINÚSCULO ([a-z0-9._-], 2-81 chars).
+  Este problema ainda não existe no servidor (slug assim nunca é aceito), então é SEGURO
+  corrigir: edite $d/.moj-id trocando \"id\" p/ \"$repo#$sug\" e \"prob\" p/ \"$sug\",
+  e rode 'moj push $d' de novo."
+  fi
   # TÍTULO obrigatório: sem ele o problema sai com o nome da pasta (o servidor deriva o slug).
   local title; title="$(jq -r '.title // ""' "$d/.moj-id")"
   if [[ -z "$title" || "$title" == "Título do Problema" ]]; then
@@ -645,13 +664,24 @@ cmd_push(){ need_login
   else
     api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
     jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' "$bf" > "$bf2"
-    if resp="$(API_SOFT=1 api_post_file "/problems/create" "$bf2" 2>/dev/null)"; then
-      jq -r '"enviado (novo): \(.id)  sha \(.sha)"' <<<"$resp"
-    else
+    # resposta via ARQUIVO, não $(…): o command substitution roda num SUBSHELL e
+    # API_LAST_CODE/API_LAST_BODY não chegariam ao elif/else abaixo
+    local rf; rf="$(mktemp)"
+    if API_SOFT=1 api_post_file "/problems/create" "$bf2" > "$rf" 2>/dev/null; then
+      jq -r '"enviado (novo): \(.id)  sha \(.sha)"' < "$rf"; rm -f "$rf"
+    elif [[ "${API_LAST_CODE:-}" == 409 ]]; then
+      rm -f "$rf"
       # 409 "já existe" (índice ainda não enxergou o problema): reenvia como EDIT em vez de morrer
       jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
       resp="$(api_post_file "/problems/edit" "$bf2")" || { rm -f "$bf" "$bf2"; exit 1; }
       jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
+    else
+      # erro REAL do create (400/403/…): mostrar a mensagem do SERVIDOR. O fallback cego p/
+      # o edit trocava "Nome de problema inválido" por um "Problema não existe (404)" sem pé
+      # nem cabeça (caso Edson, 2026-08-06). Só o 409 justifica reenviar como edit.
+      local emsg; emsg="$(jq -r '.error.message // .message // empty' <<<"${API_LAST_BODY:-}" 2>/dev/null)"
+      rm -f "$bf" "$bf2" "$rf"
+      die "criar '$id' falhou${API_LAST_CODE:+ (HTTP $API_LAST_CODE)}: ${emsg:-erro do servidor sem mensagem}"
     fi
   fi
   rm -f "$bf" "$bf2"; echo "publique com 'moj publish $id' quando estiver pronto."; }

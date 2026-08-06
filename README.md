@@ -77,7 +77,7 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj edit <id\|dir>` | **editor interativo** (campos da página) |
 | `moj ls [mine\|shared\|public]` · `moj repos` | listas |
 | `moj info <id>` | tudo do problema (dono, público, coleções, validação, contagens) |
-| `moj new <org> <prob>` | scaffold completo do pacote em `./<prob>` (o 1º arg é a **org** do id `<org>#<prob>`) |
+| `moj new <org> <prob>` | scaffold completo do pacote em `./<prob>` (o 1º arg é a **org** do id `<org>#<prob>`; `<prob>` é slug **MINÚSCULO** `[a-z0-9._-]` — a CLI recusa na hora e sugere o certo) |
 | `moj clone <id> [dir]` | baixa o pacote **inteiro** (enunciado, conf, exemplos, testes, soluções, **`scripts/` e `tests/score`**) |
 | `moj test [dir] [--run [sol]]` · `moj push [dir] [--force]` | pré-voo local (**com `tests/score` confere os GRUPOS**: distribuição por grupo, teste órfão, linha inválida — antes de enviar; **`--run` JULGA localmente** via mojtools; Linux+bwrap) · envia (cria/edita; **round-trip completo**, `scripts/` incluído) |
 | `moj doctor` · `moj version` · `moj update` | **diagnóstico do ambiente** (atualização, jq/curl, mojtools, bwrap, sessão) · build local×servidor · **auto-atualiza** a CLI baixando os artefatos servidos |

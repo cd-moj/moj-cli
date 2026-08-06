@@ -160,6 +160,7 @@ api_post_file(){ # api_post_file PATH BODYFILE -> POST grande (corpo via arquivo
   code="$(curl -sS -o "$tmp" -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X POST -H 'Content-Type: application/json' --data-binary @"$f" "$MOJ_URL/api/v1$p" 2>/dev/null || true)"
   out="$(cat "$tmp")"; rm -f "$tmp"
   API_LAST_CODE="$code"
+  API_LAST_BODY="$out"   # com API_SOFT=1 o _api_fail não imprime: o chamador lê a msg daqui
   [[ "$code" =~ ^2 ]] && { printf '%s' "$out"; return 0; }
   _api_fail "$code" "$out"
 }
