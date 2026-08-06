@@ -55,7 +55,7 @@
 #      `check` diz o esperado de um time sem ele precisar logar.)
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
-#   moj-contest -c <cid> docs ls | gen [info|caderno|times…] [--lang pt|en|both]
+#   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|both]
 #                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
@@ -349,14 +349,15 @@ cmd_news(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     *) die "news: sub desconhecido '$sub' (ls|add|rm)";;
   esac; }
 
-# ---- documentos da prova (info sheet, caderno, folha de time limits) -----------------------
+# ---- documentos da prova (info sheet, caderno, folha de time limits, editorial) ------------
 # `ls`/`get` valem p/ QUALQUER conta do contest (a sede baixa o que foi publicado; o gate é do
 # servidor). O resto exige sessão .admin ou .cjudge — a API corta o que o login não pode.
 _doc_type(){ case "$1" in
     info|info-sheet|ambiente) printf 'info-sheet';;
     caderno|contest|prova|problemset) printf 'contest';;
     times|tl|tempos) printf 'times';;
-    *) die "tipo desconhecido: $1 (info | caderno | times)";;
+    editorial|solucoes|soluções) printf 'editorial';;
+    *) die "tipo desconhecido: $1 (info | caderno | times | editorial)";;
   esac; }
 _doc_lang(){ case "$1" in pt|PT) printf pt;; en|EN) printf en;; *) die "lang deve ser pt ou en";; esac; }
 cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
@@ -382,7 +383,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       api POST "/contest/admin/docs$(qc)" "$(jq -cn --argjson t "$types" --argjson l "$langs" '{action:"generate",types:$t,langs:$l}')" \
         | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang)|join(", ")))" else "" end)"';;
     get|download)
-      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|all> [--lang pt|en|both] [--fmt pdf|html] [-o arquivo]"
+      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|both] [--fmt pdf|html] [-o arquivo]"
       local what="$1" fmt=pdf outf="" langs=(pt) a; shift
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in
@@ -393,7 +394,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         esac
       done
       local types=() t l f
-      if [[ "$what" == all || "$what" == todos ]]; then types=(info-sheet contest times)
+      if [[ "$what" == all || "$what" == todos ]]; then types=(info-sheet contest times editorial)
       else types=("$(_doc_type "$what")"); fi
       [[ -n "$outf" && ( ${#types[@]} -gt 1 || ${#langs[@]} -gt 1 ) ]] && die "-o só com UM tipo e UM idioma"
       # em lote, documento ausente (não gerado/não publicado — a sede só vê o publicado) é
@@ -411,7 +412,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         fi
       done; done;;
     publish|unpublish)
-      [[ $# -ge 1 ]] || die "uso: docs $sub <info|caderno|times> [--lang pt|en] [--news]"
+      [[ $# -ge 1 ]] || die "uso: docs $sub <info|caderno|times|editorial> [--lang pt|en] [--news]"
       local t; t="$(_doc_type "$1")"; shift
       local l=pt news=false a
       while [[ $# -gt 0 ]]; do a="$1"; shift
