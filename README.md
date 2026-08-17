@@ -163,7 +163,7 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | Comando | O que faz |
 |---|---|
 | `login <cid> [-u login]` · `logout [<cid>]` · `whoami` | sessão por contest |
-| `create [spec.json\|-] [--template N] [--id --name --start --end]` | cria (spec JSON, template salvo, ou ambos) |
+| `create [spec.json\|-] [--template N] [--id --name --start --end] [--empty]` | cria (spec JSON, template salvo, ou ambos). Exige **ao menos um problema** — `--empty` cria a sala vazia e os problemas entram depois com `problems add` |
 | `list` · `show <cid>` | seus contests · resumo de um |
 | `export <cid> [arq] [--full]` · `duplicate <cid> [--id --name --start --end]` | spec p/ arquivo (sem credenciais) · cópia (sem usuários) |
 | `template list\|show\|save <nome> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | templates nomeados no servidor |

@@ -8,7 +8,9 @@
 # contest em ~/.config/moj/token-<cid> — não atropela sua sessão de autoria).
 #
 #   moj-contest login <cid> [-u login]   moj-contest logout [<cid>]   moj-contest whoami
-#   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E]
+#   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E] [--empty]
+#     (a criação exige ao menos UM problema; `--empty` cria a sala vazia — os problemas entram
+#      depois com `-c <cid> problems add`. O contest entra no ar na hora, em qualquer caso.)
 #   moj-contest list                     (contests criados por você)
 #   moj-contest show <cid>               moj-contest export <cid> [arquivo] [--full]
 #   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]
@@ -109,7 +111,7 @@ cmd_whoami(){ need_contest; need_login
 
 # ---- criação / reuso (sessão do treino) ---------------------------------------------------
 cmd_create(){ need_login_t
-  local specf="" tpl="" id="" name="" start="" end="" a
+  local specf="" tpl="" id="" name="" start="" end="" empty=0 a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in
       --template) tpl="$1"; shift;;
@@ -117,6 +119,8 @@ cmd_create(){ need_login_t
       --name) name="$1"; shift;;
       --start) start="$1"; shift;;
       --end) end="$1"; shift;;
+      --empty|--allow-empty) empty=1;;
+      --*) die "opção desconhecida: $a";;
       *) specf="$a";;
     esac
   done
@@ -140,6 +144,8 @@ cmd_create(){ need_login_t
   [[ -n "$name" ]] && spec="$(jq -c --arg v "$name" '.name=$v' <<<"$spec")"
   [[ -n "$start" ]] && spec="$(jq -c --argjson v "$start" '.start=$v' <<<"$spec")"
   [[ -n "$end" ]] && spec="$(jq -c --argjson v "$end" '.end=$v' <<<"$spec")"
+  # --empty é aplicado DEPOIS do spec/template: a leitura do arquivo (acima) reescreve $spec inteiro
+  [[ "$empty" == 1 ]] && spec="$(jq -c '.allow_empty=true' <<<"$spec")"
   [[ "$(jq -r '.end // empty' <<<"$spec")" ]] || die "faltou o fim: --end <epoch> (ou spec/template com end/duration)"
   local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
   CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
