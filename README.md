@@ -179,10 +179,11 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `rounds publish\|unpublish <slug>` · `rounds archive <slug> [arq]` | libera o placar da rodada arquivada p/ os times · baixa o arquivo bruto (com código-fonte) |
 | `cohorts ls` · `cohorts add <id> [--regex R] [--private] [--unranked]` · `cohorts assign <login> <id>` · `cohorts materialize` · `cohorts release` | **coortes de placar**: times oficiais × **convidados** (extra-oficiais/"CCL"). Coorte privada não aparece no placar público nem no diretório de times, e os regulares não sabem que existe; os convidados veem todos. `--unranked` = entra intercalado sem consumir posição oficial. `release` é o "liberamos tudo" (pede o id do contest) |
 | `machines [--round <slug>] [--csv]` | **time × IP × User-Agent** da rodada: é no aquecimento que os times ligam as máquinas. Marca quem trocou de máquina depois e sugere a substring comum p/ o gate de navegador |
-| `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|both]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML |
+| `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|es\|both\|all]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML, nos três idiomas |
 | `docs get <info\|caderno\|times\|all> [--lang …] [--fmt pdf\|html] [-o arq]` | baixa (a sede usa este: `ls`/`get` funcionam com QUALQUER conta do contest, e só enxergam o que foi **publicado**) |
 | `docs publish <tipo> [--lang pt] [--news]` · `docs unpublish <tipo>` | libera p/ a sede e p/ a seção "Prova" do contest; `--news` cria a notícia com o PDF anexo |
 | `docs cover <capa.pdf> [--lang pt]` · `docs cover --rm` | capa do caderno em **PDF enviado** (vence a editada/gerada) |
+| `docs upload <tipo> <doc.pdf> [--lang pt]` · `docs upload <tipo> --rm` | o **documento PRONTO** daquele tipo+idioma (feito fora do MOJ): **vence o gerado** em tudo que é servido; `--rm` volta ao gerado |
 | `docs set caderno_version=v1.2 [errata=…] [cover_note=…]` · `docs text <info\|capa> [--show\|--from arq\|--reset]` | dados e textos editáveis (Markdown com marcadores `{{…}}`) |
 | `remove <cid>` | tira do ar (lixeira; exige `.admin` do treino) |
 

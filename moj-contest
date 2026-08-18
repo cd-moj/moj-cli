@@ -57,10 +57,11 @@
 #      `check` diz o esperado de um time sem ele precisar logar.)
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
-#   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|both]
+#   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|es|both|all]
 #                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
+#                       | upload <tipo> <doc.pdf> [--lang pt]  (PDF PRONTO: vence o gerado; --rm volta)
 #                       | set caderno_version=v1.2 [errata=…] [cover_note=…]
 #                       | text <info|capa> [--lang pt] [--show | --from arq|- | --reset]
 #     (documentos da prova: info sheet, caderno e folha de time limits, em PDF+HTML e pt/en.
@@ -365,7 +366,7 @@ _doc_type(){ case "$1" in
     editorial|solucoes|soluções) printf 'editorial';;
     *) die "tipo desconhecido: $1 (info | caderno | times | editorial)";;
   esac; }
-_doc_lang(){ case "$1" in pt|PT) printf pt;; en|EN) printf en;; *) die "lang deve ser pt ou en";; esac; }
+_doc_lang(){ case "$1" in pt|PT) printf pt;; en|EN) printf en;; es|ES) printf es;; *) die "lang deve ser pt, en ou es";; esac; }
 cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
     ls|list)
@@ -373,13 +374,14 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       [[ "$(jq -r '(.docs|length)' <<<"$r" 2>/dev/null)" == 0 ]] && \
         echo "(nenhum documento $(jq -e '.can_manage' <<<"$r" >/dev/null 2>&1 && echo gerado || echo publicado) ainda)" >&2
       printf '%s' "$r" | out '.docs[]? |
-        "\(.type)\t\(.lang)\tPDF \((.pdf_bytes/1024|floor))KB\tHTML \((.html_bytes/1024|floor))KB\t\(.generated_at|todate)\t\(if .published then "publicado" else "" end)"' \
+        "\(.type)\t\(.lang)\t\(if .uploaded then "ENVIADO \((.uploaded_bytes/1024|floor))KB" else "PDF \((.pdf_bytes/1024|floor))KB" end)\tHTML \((.html_bytes/1024|floor))KB\t\(if (.generated_at//0)>0 then (.generated_at|todate) else "-" end)\t\(if .published then "publicado" else "" end)"' \
         | { column -t -s$'\t' 2>/dev/null || cat; };;
     gen|generate)
-      local types='[]' langs='["pt","en"]' a
+      local types='[]' langs='["pt","en","es"]' a
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in
-          --lang) [[ "$1" == both || "$1" == ambos ]] && langs='["pt","en"]' || langs="$(jq -cn --arg l "$(_doc_lang "$1")" '[$l]')"; shift;;
+          --lang) case "$1" in both|ambos) langs='["pt","en"]';; all|todos) langs='["pt","en","es"]';;
+                    *) langs="$(jq -cn --arg l "$(_doc_lang "$1")" '[$l]')";; esac; shift;;
           -*) die "opção desconhecida: $a";;
           *) types="$(jq -c --arg t "$(_doc_type "$a")" '. + [$t]' <<<"$types")";;
         esac
@@ -389,11 +391,12 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       api POST "/contest/admin/docs$(qc)" "$(jq -cn --argjson t "$types" --argjson l "$langs" '{action:"generate",types:$t,langs:$l}')" \
         | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang)|join(", ")))" else "" end)"';;
     get|download)
-      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|both] [--fmt pdf|html] [-o arquivo]"
+      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|es|both|all] [--fmt pdf|html] [-o arquivo]"
       local what="$1" fmt=pdf outf="" langs=(pt) a; shift
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in
-          --lang) if [[ "$1" == both || "$1" == ambos ]]; then langs=(pt en); else langs=("$(_doc_lang "$1")"); fi; shift;;
+          --lang) case "$1" in both|ambos) langs=(pt en);; all|todos) langs=(pt en es);;
+                    *) langs=("$(_doc_lang "$1")");; esac; shift;;
           --fmt) [[ "$1" == pdf || "$1" == html ]] || die "fmt deve ser pdf ou html"; fmt="$1"; shift;;
           -o|--out) outf="$1"; shift;;
           *) die "opção desconhecida: $a";;
@@ -418,7 +421,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         fi
       done; done;;
     publish|unpublish)
-      [[ $# -ge 1 ]] || die "uso: docs $sub <info|caderno|times|editorial> [--lang pt|en] [--news]"
+      [[ $# -ge 1 ]] || die "uso: docs $sub <info|caderno|times|editorial> [--lang pt|en|es] [--news]"
       local t; t="$(_doc_type "$1")"; shift
       local l=pt news=false a
       while [[ $# -gt 0 ]]; do a="$1"; shift
@@ -440,6 +443,25 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         local tmp; tmp="$(mktemp)"
         jq -cn --arg l "$l" --arg b "$(_b64enc "$file")" '{action:"cover",lang:$l,pdf_b64:$b}' > "$tmp"
         api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"capa enviada ('"$l"'): \(.bytes) bytes — gere o caderno de novo"'
+        rm -f "$tmp"
+      fi;;
+    upload|up)
+      # docs upload <tipo> <arquivo.pdf> [--lang pt]  |  docs upload <tipo> --rm [--lang pt]
+      # sobe o PDF PRONTO daquele tipo+idioma: VENCE o gerado em tudo que é servido; --rm volta.
+      [[ $# -ge 1 ]] || die "uso: docs upload <info|caderno|times|editorial> <arquivo.pdf> [--lang pt|en|es]   (ou --rm)"
+      local t; t="$(_doc_type "$1")"; shift
+      local file="" rm=0 l=pt a
+      while [[ $# -gt 0 ]]; do a="$1"; shift
+        case "$a" in --lang) l="$(_doc_lang "$1")"; shift;; --rm|--remove) rm=1;; -*) die "opção desconhecida: $a";; *) file="$a";; esac
+      done
+      if [[ "$rm" == 1 ]]; then
+        api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg t "$t" --arg l "$l" '{action:"upload",type:$t,lang:$l,remove_upload:true}')" \
+          | out '"PDF enviado removido ('"$t.$l"') — volta a valer o gerado"'
+      else
+        [[ -f "$file" ]] || die "uso: docs upload <tipo> <arquivo.pdf> [--lang pt|en|es]   (ou --rm)"
+        local tmp; tmp="$(mktemp)"
+        jq -cn --arg t "$t" --arg l "$l" --arg b "$(_b64enc "$file")" '{action:"upload",type:$t,lang:$l,pdf_b64:$b}' > "$tmp"
+        api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"PDF enviado ('"$t.$l"'): \(.bytes) bytes — é ele que os times baixam"'
         rm -f "$tmp"
       fi;;
     set)
@@ -469,14 +491,14 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       done
       local key="${which}_${l}"
       case "$mode" in
-        show) api GET "/contest/admin/docs$(qc)" | jq -r --arg k "$key" '.templates[$k] // ""';;
+        show) api GET "/contest/admin/docs$(qc)" | jq -r --arg w "$which" --arg l "$l" --arg k "$key" '(.templates[$w][$l]? // .templates[$k]) // ""';;
         reset) api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg k "$key" '{action:"config"} + {($k):""}')" | out '"texto '"$key"' voltou ao padrão"';;
         set) local txt tmp
           if [[ "$src" == - ]]; then txt="$(cat)"; else [[ -f "$src" ]] || die "arquivo não existe: $src"; txt="$(cat "$src")"; fi
           tmp="$(mktemp)"; jq -cn --arg k "$key" --arg v "$txt" '{action:"config"} + {($k):$v}' > "$tmp"
           api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"texto '"$key"' salvo"'; rm -f "$tmp";;
       esac;;
-    *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|set|text)";;
+    *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|upload|set|text)";;
   esac; }
 
 # ---- rodadas (aquecimento -> prova oficial no MESMO contest) --------------------------------
