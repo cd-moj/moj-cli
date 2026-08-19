@@ -27,7 +27,9 @@
 #   moj validate <id>             (valida E (RE)ENFILEIRA calibração; NÃO publica — pode ser privado.
 #                                  Só CONSULTAR o estado = moj status/check, que são read-only)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
-#   moj calibrate <id> | --all-stale  (lote: recalibra TUDO que "precisa recalibrar" no painel)
+#   moj calibrate <id> [--hosts h1,h2|--all-judges|--per-cpu] | --judges | --all-stale
+#                                 (direcionada = calibra nos juízes citados/todos online/1 por CPU,
+#                                  como na web; --judges lista o parque; --all-stale = o lote do painel)
 #   moj calib <id>                (a calibração POR EXTENSO: cada juiz, solução a solução, teste a
 #                                  teste {name,code,time,tl} — `--json` p/ ferramentas externas)
 #   moj calib-report <id> [--host <j> --sol <s>] [-o f.html]  (report.html de uma solução; sem
@@ -303,7 +305,11 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
   fi
   api POST "/problems/set-public" "$(jq -n --arg id "$id" --argjson p "$v" '{id:$id,public:$p}')" \
     | jq -r 'if .public then "\(.id): PÚBLICO — o servidor VALIDA + CALIBRA (reqid \(.reqid // "?")). Acompanhe com: moj check \(.id)" else "\(.id): despublicado (saiu do treino livre)" end'; }
-cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id> | moj calibrate --all-stale"
+# calibração: global (1 juiz livre pega), DIRECIONADA a juízes (--hosts/--all-judges/--per-cpu —
+# paridade com a "Calibração direcionada" do editor web; o servidor dedupa por host), lote
+# (--all-stale) e a lista de juízes p/ escolher (--judges). Gate do servidor: quem EDITA o problema.
+cmd_calibrate(){ need_login
+  [[ $# -ge 1 ]] || die "uso: moj calibrate <id> [--hosts h1,h2 | --all-judges | --per-cpu] | --judges | --all-stale"
   if [[ "$1" == --all-stale ]]; then
     # recalibra o LOTE inteiro do painel (tudo que "precisa recalibrar"); o servidor recomputa a
     # lista autorizada e enfileira com dedup+serialização (lote é seguro por construção)
@@ -312,7 +318,49 @@ cmd_calibrate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calibrate <id> | mo
       ((.queued // [])[] | "  \(.id)  (reqid \(.reqid))")'; }
     return
   fi
-  api POST "/problems/request-calibration" "$(jq -n --arg id "$1" '{id:$id}')" | jq -r '"calibração enfileirada: \(.id) (reqid \(.reqid))"'; }
+  if [[ "$1" == --judges ]]; then     # os juízes do parque (p/ montar um --hosts)
+    api GET "/problems/judges" | { [[ "$RAW" == 1 ]] && cat || {
+      jq -r '.judges[]? | "  \(.host)\t\(.cpu // "?")\t\(if .online then "online" else "OFFLINE" end)"' \
+        | { column -t -s$'\t' 2>/dev/null || cat; }; }; }
+    return
+  fi
+  local id="$1" mode="" want="" a; shift
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      --hosts) want="${1:?faltou a lista de --hosts}"; mode=hosts; shift;;
+      --all-judges|--all) mode=all;;
+      --per-cpu|--percpu) mode=percpu;;
+      *) die "opção desconhecida: $a";;
+    esac
+  done
+  local hosts='[]'
+  if [[ -n "$mode" ]]; then
+    local jl h known
+    jl="$(api GET "/problems/judges")"
+    case "$mode" in
+      all)    hosts="$(jq -c '[.judges[]? | select(.online) | .host]' <<<"$jl")";;
+      percpu) hosts="$(jq -c '[.judges[]? | select(.online)] | group_by(.cpu // "?") | map(.[0].host)' <<<"$jl")";;
+      hosts)
+        hosts="$(jq -cn --arg h "$want" '$h | split(",") | map(select(length>0)) | unique')"
+        # valida ANTES do POST: host desconhecido = erro com a lista (o servidor o pularia em
+        # SILÊNCIO); host conhecido mas offline = aviso e envia (o comando espera o juiz voltar)
+        known="$(jq -r '.judges[]?.host' <<<"$jl")"
+        while IFS= read -r h; do
+          grep -qx -- "$h" <<<"$known" \
+            || die "juiz desconhecido: '$h' — existem: $(jq -r '[.judges[]?.host] | join(", ")' <<<"$jl")"
+          jq -e --arg h "$h" '.judges[]? | select(.host==$h) | .online' <<<"$jl" >/dev/null 2>&1 \
+            || echo "  ⚠ $h está OFFLINE — a calibração fica na fila dele e roda quando voltar" >&2
+        done < <(jq -r '.[]' <<<"$hosts")
+        ;;
+    esac
+    [[ "$(jq 'length' <<<"$hosts")" -gt 0 ]] || die "nenhum juiz online — veja 'moj calibrate --judges'"
+  fi
+  api POST "/problems/request-calibration" \
+    "$(jq -cn --arg id "$id" --argjson h "$hosts" '{id:$id} + (if ($h|length) > 0 then {hosts:$h} else {} end)')" \
+    | out '"calibração de \(.id): " + (if .hosts then
+             (.hosts | map("\(.host)\(if .status == "already_queued" then " (JÁ na fila)" else "" end)") | join(", "))
+           elif .status == "already_queued" then "JÁ na fila (reqid \(.reqid // "?")) — nada novo enfileirado"
+           else "enfileirada (reqid \(.reqid // "?")) — 1 juiz livre pega" end)'; }
 # moj validate <id> — PORTÃO DE QUALIDADE sem publicar: roda o validador estático (enunciado, testes,
 # soluções, seções obrigatórias) + gera o índice, e pede calibração ao juiz. O problema segue PRIVADO
 # — publicar é `moj public <id> on`, e aí a ORG precisa permitir. Espera o relatório novo (o campo
@@ -1118,6 +1166,6 @@ case "$cmd" in
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

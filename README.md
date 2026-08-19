@@ -88,7 +88,7 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
 | `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
 | `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) **e (RE)ENFILEIRA calibração** no juiz. O problema **continua privado** — é o comando para prova em elaboração. ⚠ Não use como "ver status": cada chamada re-dispara calibração — p/ só CONSULTAR use `moj status`/`check` (read-only) |
-| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar; **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
+| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id> [--hosts h1,h2\|--all-judges\|--per-cpu]` \| `--judges` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar — **direcionada** como na web: `--hosts` nos juízes citados (desconhecido = erro com a lista; offline = aviso e espera), `--all-judges` em todos os online, `--per-cpu` em 1 juiz online por modelo de CPU; `--judges` lista o parque (host/CPU/online); repetir NÃO duplica (`already_queued` por host); **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj calib <id>` | a calibração **POR EXTENSO**: cada juiz, cada solução (`good/pass/slow/wrong`), cada teste `{name,code,time,tl}` — o mesmo formato do resultado de submissão. Com `--json`, o JSON cru (campo `sols` por host) p/ integrar com ferramentas externas; juiz antigo sem o vetor cai no log texto |
@@ -249,6 +249,6 @@ compartilhada (laboratório), outro usuário rodando `ps` vê só o caminho do a
 
 ## Saída crua (--json)
 
-`moj --json <ls|board|status|check|calib|testrun|testrun-status> …` imprime a resposta da API sem
+`moj --json <ls|board|status|check|calib|calibrate|testrun|testrun-status> …` imprime a resposta da API sem
 formatação (scripts/pipelines); no `moj-contest` a flag global `--json` já existia e continua
 igual (agora ambos usam o mesmo `out()`).
