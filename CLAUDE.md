@@ -10,6 +10,9 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   problemas + o que revisar), `new`, `test`, `preview`, `download/upload`, `public`, `publish`
   (público => o servidor **valida + calibra**, via `set-public`), `calibrate`, `status [<id>]` /
   `check <id>` (QA: validação + TL por juiz + solução good sem TL / falhou em todas as máquinas),
+  `calib` (a calibração POR EXTENSO, por juiz/solução/teste — `--json` p/ ferramentas externas),
+  `calib-report` (baixa o report.html de uma solução calibrada), `testrun`/`testrun-status`
+  (roda UMA solução avulsa NO JUIZ, fora do history — exige permissão de edição),
   `share` (= adiciona membro à org), `org` (list/create/members/public/rm — **ACESSO**: a org é o
   `<org>` do id; membros escrevem, admins mexem na trava de público; `rm` só org **vazia**),
   `mv <id> <org>` (move rascunho, muda o id), `collection` (ls/create/show/add/remove/rename/delete — **COLEÇÃO = tag de agrupamento**,

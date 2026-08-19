@@ -28,7 +28,14 @@
 #                                  Só CONSULTAR o estado = moj status/check, que são read-only)
 #   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
 #   moj calibrate <id> | --all-stale  (lote: recalibra TUDO que "precisa recalibrar" no painel)
-#   (--json antes do subcomando = saída crua em ls/board/status/check)
+#   moj calib <id>                (a calibração POR EXTENSO: cada juiz, solução a solução, teste a
+#                                  teste {name,code,time,tl} — `--json` p/ ferramentas externas)
+#   moj calib-report <id> [--host <j> --sol <s>] [-o f.html]  (report.html de uma solução; sem
+#                                  host/sol LISTA os disponíveis)
+#   moj testrun <id|dir> <sol> [--report f.html]  (roda UMA solução avulsa NO JUIZ — jaula e TL
+#                                  reais, fora do history; exige permissão de EDIÇÃO no problema)
+#   moj testrun-status <run>      (consulta um testrun já enfileirado)
+#   (--json antes do subcomando = saída crua em ls/board/status/check/calib/testrun*)
 #   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
 #   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
 #   moj collection ls|create|show|add|remove|rename|delete|status  (coleções = tags de agrupamento, m:n;
@@ -398,8 +405,99 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
   jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
   echo "  Time limits (máx entre juízes):"
   jq -r '(.time_limits//{})|to_entries|map(select(.key!="default"))| if length==0 then "    (sem TL)" else (map("    \(.key): \(.value)s")|join("\n")) end' <<<"$tt" 2>/dev/null
+  # TLOVERRIDE do conf: o autor mandou no TL — o exibido acima JÁ é o efetivo
+  jq -r 'if (.tl_override // {}) != {} then "  ⚙ TL OVERRIDE no conf (vence o calibrado): " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else empty end' <<<"$tt" 2>/dev/null
   echo "  Calibração por máquina:"
   jq -r '(.hosts//[])[] | "    \(.host): " + ((.tl//{})|to_entries|map(select(.key!="default"))|map("\(.key)=\(.value)")|join(" ")) + (if ((.missing//[])|length)>0 then "   (falta: \(.missing|join(","))" + ")" else "" end)' <<<"$ct" 2>/dev/null || echo "    (não calibrado)"
+}
+# CALIBRAÇÃO ESTRUTURADA: o que cada juiz rodou, solução a solução, teste a teste — o campo
+# `sols` do /problems/calib ([{file,lang,category,verdict,tests:[{name,code,time,tl}]}]).
+# P/ integrar com ferramentas externas: `moj --json calib <id>` (JSON cru).
+cmd_calib(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calib <id>"
+  local id="$1" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+  jq -r '"\(.id)  (checksum \((.checksum // "?")[0:8]))" +
+         (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
+         (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
+  jq -r '(.hosts // [])[] |
+    "— \(.host)  \(.at // 0 | todate)  TL: " + ((.tl // {})|to_entries|map("\(.key)=\(.value)")|join(" ")),
+    (if ((.sols // [])|length) > 0 then
+      (.sols[] | "  \(.category)/\(.file) [\(.lang)]: \(.verdict)",
+        ((.tests // [])[] | "    \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"))
+     else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end)' <<<"$j" 2>/dev/null
+}
+# report.html de UMA solução da calibração, por juiz (GET /problems/calib-report).
+cmd_calib_report(){ need_login
+  [[ $# -ge 1 ]] || die "uso: moj calib-report <id> [--host <juiz> --sol <nome>] [-o <out.html>]"
+  local id="$1" host="" name="" out=""; shift
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --host) host="${2:-}"; shift;; --sol|--name) name="${2:-}"; shift;;
+    -o|--out) out="${2:-}"; shift;; *) die "opção desconhecida: $1";; esac; shift; done
+  if [[ -z "$host" || -z "$name" ]]; then   # sem host/sol: lista o que existe
+    api GET "/problems/calib?id=$(enc "$id")" | jq -r --arg id "$id" '
+      "reports disponíveis (baixe com: moj calib-report \($id) --host <juiz> --sol <nome> -o out.html):",
+      ((.hosts // [])[] | . as $h | (.reports // [])[] | "  --host \($h.host) --sol \(.)")'
+    return
+  fi
+  [[ -n "$out" ]] || { out="calib-${id//[#\/]/_}-$host-$name.html"; }
+  api_get_to_file "/problems/calib-report?id=$(enc "$id")&host=$(enc "$host")&name=$(enc "$name")" "$out"
+  echo "salvo: $out"
+}
+# TESTE REMOTO NO JUIZ: roda UMA solução avulsa contra o problema — mesma jaula, mesmo TL
+# calibrado da submissão real — SEM entrar em history/placar de ninguém. Só quem EDITA o
+# problema (o resultado expõe os testes ocultos). Devolve o vetor {name,code,time,tl} por teste.
+cmd_testrun(){ need_login
+  [[ $# -ge 2 ]] || die "uso: moj testrun <id|dir> <arquivo-solução> [--report <out.html>] [--no-wait]"
+  local ref="$1" sol="$2" report="" wait=1; shift 2
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --report) report="${2:-}"; shift;; --no-wait|-n) wait=0;;
+    *) die "opção desconhecida: $1";; esac; shift; done
+  [[ -f "$sol" ]] || die "arquivo não encontrado: $sol"
+  local id="$ref"
+  [[ -f "$ref/.moj-id" ]] && id="$(mid "$ref" id)"    # aceita o dir do clone no lugar do id
+  [[ "$id" == *#* ]] || die "id inválido: '$id' (esperado <org>#<prob>, ou o dir de um clone)"
+  # corpo por ARQUIVO (fonte grande nunca anda por argv)
+  local b64f bodyf resp run
+  b64f="$(mktemp)"; bodyf="$(mktemp)"
+  base64 -w0 "$sol" > "$b64f" 2>/dev/null || base64 "$sol" | tr -d '\n' > "$b64f"
+  jq -cn --arg id "$id" --arg f "$(basename "$sol")" --rawfile b "$b64f" \
+    '{id:$id, filename:$f, code_b64:$b}' > "$bodyf"
+  rm -f "$b64f"
+  resp="$(api_post_file "/problems/test-run" "$bodyf")"; rm -f "$bodyf"
+  run="$(jq -r '.run // empty' <<<"$resp")"
+  [[ -n "$run" ]] || die "resposta inesperada do servidor: ${resp:0:200}"
+  echo "enfileirado no juiz: run $run  ($(basename "$sol") contra $id)"
+  [[ "$wait" == 1 ]] || { echo "acompanhe com: moj --json testrun-status $run"; return 0; }
+  local i j st
+  for (( i=0; i<200; i++ )); do            # ~10 min (fila + pacote frio + julgamento)
+    sleep 3
+    j="$(api GET "/problems/test-run?run=$run" 2>/dev/null)" || continue
+    st="$(jq -r '.status // ""' <<<"$j")"
+    [[ "$st" == done ]] || continue
+    if [[ "$RAW" == 1 ]]; then printf '%s\n' "$j"; else
+      jq -r '"veredicto: \(.verdict // "?")  (\(.correct // 0)/\(.total_tests // 0) testes, \(.duration_s // "?")s, tl \(.tl_used // "?")s)",
+             ((.tests // [])[] | "  \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)")' <<<"$j"
+    fi
+    if [[ -n "$report" ]]; then
+      api_get_to_file "/problems/test-run-report?run=$run" "$report" && echo "report: $report"
+    fi
+    return 0
+  done
+  echo "  (ainda julgando — consulte depois: moj testrun-status $run${report:+ e o report})"; return 1
+}
+# consulta avulsa de um test-run já enfileirado (id devolvido pelo moj testrun)
+cmd_testrun_status(){ need_login; [[ $# -ge 1 ]] || die "uso: moj testrun-status <run> [--report <out.html>]"
+  local run="$1" report=""; shift
+  while [[ $# -gt 0 ]]; do case "$1" in --report) report="${2:-}"; shift;; *) die "opção desconhecida: $1";; esac; shift; done
+  local j; j="$(api GET "/problems/test-run?run=$(enc "$run")")"
+  if [[ "$RAW" == 1 ]]; then printf '%s\n' "$j"; else
+    jq -r 'if .status == "done" then
+             "veredicto: \(.verdict // "?")  (\(.correct // 0)/\(.total_tests // 0) testes)",
+             ((.tests // [])[] | "  \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)")
+           else "status: \(.status // "?")  (\(.filename // "?") contra \(.problem_id // "?"))" end' <<<"$j"
+  fi
+  [[ -n "$report" ]] && api_get_to_file "/problems/test-run-report?run=$(enc "$run")" "$report" && echo "report: $report"
+  return 0
 }
 # PAINEL dos meus problemas: o que precisa de atenção, de relance (GET /problems/status).
 cmd_board(){ need_login; local j; j="$(api GET "/problems/status")"
@@ -1015,9 +1113,11 @@ case "$cmd" in
   validate|validar) cmd_validate "$@";;
   doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update|selfupdate) cmd_update "$@";;
   publish) cmd_publish "$@";; public) cmd_public "$@";; calibrate) cmd_calibrate "$@";; status) cmd_status "$@";; check) cmd_check "$@";; board|painel) cmd_board "$@";;
+  calib) cmd_calib "$@";; calib-report) cmd_calib_report "$@";;
+  testrun|test-run) cmd_testrun "$@";; testrun-status) cmd_testrun_status "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac

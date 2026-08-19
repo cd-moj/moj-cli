@@ -91,6 +91,10 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id>` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar; **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
 | `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
+| `moj calib <id>` | a calibração **POR EXTENSO**: cada juiz, cada solução (`good/pass/slow/wrong`), cada teste `{name,code,time,tl}` — o mesmo formato do resultado de submissão. Com `--json`, o JSON cru (campo `sols` por host) p/ integrar com ferramentas externas; juiz antigo sem o vetor cai no log texto |
+| `moj calib-report <id> [--host <juiz> --sol <nome>] [-o out.html]` | baixa o **report.html** de uma solução da calibração; sem `--host/--sol` **lista** os disponíveis |
+| `moj testrun <id\|dir> <arquivo> [--report out.html] [--no-wait]` | roda **UMA solução avulsa NO JUIZ** (mesma jaula e TL da submissão real), **fora do history/placar** — devolve veredicto + vetor `{name,code,time,tl}` por teste. Exige permissão de **EDIÇÃO** no problema (roda contra os testes ocultos). `--report` baixa o report.html |
+| `moj testrun-status <run> [--report out.html]` | consulta um testrun já enfileirado (o `run` que o `moj testrun` imprimiu) |
 | `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
 | `moj org list\|create\|members\|public\|rm` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda). `rm <nome>` remove uma org **vazia** (a implícita não sai) |
 | `moj mv <id> <org>` | move um **rascunho** p/ outra org (muda o id `<org>#<prob>`; bloqueia se público/em uso) |
@@ -245,5 +249,6 @@ compartilhada (laboratório), outro usuário rodando `ps` vê só o caminho do a
 
 ## Saída crua (--json)
 
-`moj --json <ls|board|status|check> …` imprime a resposta da API sem formatação (scripts/pipelines);
-no `moj-contest` a flag global `--json` já existia e continua igual (agora ambos usam o mesmo `out()`).
+`moj --json <ls|board|status|check|calib|testrun|testrun-status> …` imprime a resposta da API sem
+formatação (scripts/pipelines); no `moj-contest` a flag global `--json` já existia e continua
+igual (agora ambos usam o mesmo `out()`).
