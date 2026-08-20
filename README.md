@@ -95,7 +95,7 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj calib-report <id> [--host <juiz> --sol <nome>] [-o out.html]` | baixa o **report.html** de uma solução da calibração; sem `--host/--sol` **lista** os disponíveis |
 | `moj testrun <id\|dir> <arquivo> [--report out.html] [--no-wait]` | roda **UMA solução avulsa NO JUIZ** (mesma jaula e TL da submissão real), **fora do history/placar** — devolve veredicto + vetor `{name,code,time,tl}` por teste. Exige permissão de **EDIÇÃO** no problema (roda contra os testes ocultos). `--report` baixa o report.html |
 | `moj testrun-status <run> [--report out.html]` | consulta um testrun já enfileirado (o `run` que o `moj testrun` imprimiu) |
-| `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita) |
+| `moj mkdir <org>` · `moj share <org> <login>` / `unshare …` | cria org / adiciona membro (quem edita). ⚠ **quem entra é validado**: o login precisa existir no treino e **poder criar problemas** (a mesma régua de criar problema/contest) — senão volta 404 (*não existe conta*) ou 403 (*não pode criar problemas*), e **nada** é gravado. Remover nunca valida |
 | `moj org list\|create\|members\|public\|rm` | gestão de **orgs**: membros (quem escreve) + **trava de público** (privada por padrão ⇒ problemas nunca ficam públicos; só admin da org muda). `rm <nome>` remove uma org **vazia** (a implícita não sai) |
 | `moj mv <id> <org>` | move um **rascunho** p/ outra org (muda o id `<org>#<prob>`; bloqueia se público/em uso) |
 | `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | **coleções = TAGS de agrupamento** (m:n, ORTOGONAL à org; o nome pode ter **espaços**). `create "<nome>"`, `add/remove <id> "<nome>"` (marca/desmarca no problema), `show "<nome>"` (browse), `rename`/`delete` (dono da coleção) — o re-tag roda em background no servidor e a CLI **acompanha até o fim** (progresso e falhas; `--no-wait` solta); `status [job\|nome]` lista os jobs |
@@ -144,13 +144,17 @@ e `owner` nunca vêm do tar.
 
 CLI do **aluno/competidor** dentro de um contest: `login <cid|url>`, `fetch` (baixa todos os
 enunciados p/ trabalhar sem rede), `problems`, `submit <letra> <arquivo>` (espera o veredicto),
-`subs`, `score`, `news`, `clar ls|ask`, `time`, `doctor`. E o **modo emergencial de queda de
+`subs`, `score`, `news`, `clar ls|ask`, `time`, `doctor` — e, para o modo offline, **`outbox`** (o que está na fila esperando rede) e **`sync`** (tenta reenviar agora). E o **modo emergencial de queda de
 Internet**: quando o `submit` não alcança o servidor, a submissão é EMPACOTADA cifrada (chave
 pública do contest, recebida no login) com o horário UTC corrente corrigido pelo desvio medido
 do relógio; `moj-comp monitor` fica vigiando, reenvia sozinho quando a rede volta e a submissão
 **conta no horário do carimbo** (rota `/contest/offline-submit`; o carimbo é cercado por um
 beacon assinado do servidor + a chegada — ver `cdmoj/docs/FLOW.md` §7½). Guia do competidor:
 `/contest/cli.html` no servidor. Requisitos: bash, curl, jq, **openssl**.
+
+> Vários subcomandos aceitam **apelido em português**: `baixar`=`fetch`, `noticias`=`news`,
+> `relogio`=`time`, `reenviar`=`sync` (e, nas outras camadas, `maquinas`=`machines`,
+> `test-run`=`testrun`). Use o que preferir.
 
 A mesma CLI atende o **treino livre** (subconjunto, sem modo offline): `moj-comp login treino`
 (conta do site) + `problems <busca>` · `statement <org#slug>` · `submit <org#slug> <arquivo>`
@@ -183,6 +187,7 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `rounds publish\|unpublish <slug>` · `rounds archive <slug> [arq]` | libera o placar da rodada arquivada p/ os times · baixa o arquivo bruto (com código-fonte) |
 | `cohorts ls` · `cohorts add <id> [--regex R] [--private] [--unranked]` · `cohorts assign <login> <id>` · `cohorts materialize` · `cohorts release` | **coortes de placar**: times oficiais × **convidados** (extra-oficiais/"CCL"). Coorte privada não aparece no placar público nem no diretório de times, e os regulares não sabem que existe; os convidados veem todos. `--unranked` = entra intercalado sem consumir posição oficial. `release` é o "liberamos tudo" (pede o id do contest) |
 | `machines [--round <slug>] [--csv]` | **time × IP × User-Agent** da rodada: é no aquecimento que os times ligam as máquinas. Marca quem trocou de máquina depois e sugere a substring comum p/ o gate de navegador |
+| `ua-gate show` · `ua-gate check <login>` | o **gate de navegador por sede**: `show` lista as regras vigentes (isentos › regex › região › derivado do login › fallback) e `check <login>` diz qual pedaço de User-Agent o MOJ espera daquele time — é como se descobre, antes da prova, que a imagem de uma sede vai barrar todo mundo |
 | `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|es\|both\|all]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML, nos três idiomas |
 | `docs get <info\|caderno\|times\|all> [--lang …] [--fmt pdf\|html] [-o arq]` | baixa (a sede usa este: `ls`/`get` funcionam com QUALQUER conta do contest, e só enxergam o que foi **publicado**) |
 | `docs publish <tipo> [--lang pt] [--news]` · `docs unpublish <tipo>` | libera p/ a sede e p/ a seção "Prova" do contest; `--news` cria a notícia com o PDF anexo |
