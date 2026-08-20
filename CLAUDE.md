@@ -39,6 +39,12 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   serve em `web/moj*` (ver `cdmoj/docs/DEPLOY.md`). Nunca copie o script do repo direto.
   **O `make deploy` do cdmoj sincroniza sozinho** (alvo `cli-dist` roda o mkdist do checkout
   irmão e copia o que divergir) — mudou a CLI, o próximo deploy embarca.
+- **Teste o ARTEFATO, não só o script do repo**: no `dist/` a lib é EMBUTIDA, então há defeito que
+  só existe lá. Foi o caso da ajuda do `moj-comp`, que no repo saía certa e no artefato emendava no
+  cabeçalho da `core.sh` e despejava 16 linhas de tripa interna no competidor. Depois de `mkdist.sh`,
+  rode `bash dist/<tool> help` nos quatro e confira que nada de interno (`core.sh`, `@INLINE`,
+  `set -euo`) aparece. A ajuda corta sozinha (comentários da 2ª linha até o primeiro
+  não-comentário): **não** volte a escrever faixa de `sed` com número à mão.
 - Pegadinha de bash: `local a=x b=$a` NÃO funciona com `set -u` (o `local` expande os argumentos
   antes de atribuir) — declare e atribua em comandos separados.
 - Pegadinha de bash 2: função que termina num laço `while` cujo corpo acaba em `[[ … ]] && {…}`
