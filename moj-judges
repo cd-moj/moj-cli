@@ -164,6 +164,6 @@ case "$cmd" in
   cancel) cmd_cancel "$@";;
   queue) cmd_queue "$@";;
   status) cmd_status "$@";;
-  help|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
   *) die "comando desconhecido: $cmd (veja 'moj-judges help')";;
 esac

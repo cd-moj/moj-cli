@@ -415,6 +415,6 @@ case "$cmd" in
   sync|reenviar) cmd_sync "$@";;
   monitor) cmd_monitor "$@";;
   doctor) cmd_doctor "$@";; version|--version|-V) cmd_version "$@";; update) cmd_update "$@";;
-  help|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
   *) die "comando desconhecido: $cmd (veja '$MOJ_TOOL help')";;
 esac

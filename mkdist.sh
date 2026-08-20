@@ -16,7 +16,10 @@ for tool in moj moj-contest moj-judges moj-comp; do
   [[ -f "$tool" ]] || { echo "mkdist: pulando $tool (não existe)"; continue; }
   grep -q '^# @INLINE-BEGIN' "$tool" || { echo "mkdist: $tool sem marcador @INLINE-BEGIN" >&2; exit 1; }
   awk 'BEGIN{skip=0}
-    /^# @INLINE-BEGIN/{skip=1; while ((getline l < "lib/core.sh") > 0) print l; close("lib/core.sh"); next}
+    # a linha VAZIA antes da lib é o que separa o cabeçalho do artefato do cabeçalho da lib:
+    # a ajuda (`help`) imprime comentários a partir da linha 2 e PARA no primeiro não-comentário.
+    # Sem ela, no artefato de 1 arquivo a ajuda emendava e vazava o comentário interno da core.sh.
+    /^# @INLINE-BEGIN/{skip=1; print ""; while ((getline l < "lib/core.sh") > 0) print l; close("lib/core.sh"); next}
     /^# @INLINE-END/{skip=0; next}
     skip==0{print}' "$tool" \
   | sed "s/^MOJ_CLI_BUILD=\"dev\"\$/MOJ_CLI_BUILD=\"$BUILD\"/" > "dist/$tool"

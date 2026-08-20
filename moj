@@ -1164,6 +1164,6 @@ case "$cmd" in
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac
