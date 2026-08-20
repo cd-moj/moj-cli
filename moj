@@ -832,7 +832,7 @@ cmd_push(){ need_login
 
 cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o problema da base e do treino)"
   local id="$1" c=""
-  echo "⚠ Isto REMOVE o problema '$id' do Gitea e do treino — destrutivo."
+  echo "⚠ Isto REMOVE o problema '$id' — o repositório e o índice do treino. Destrutivo."
   read -rp "Para confirmar, repita o id ($id): " c </dev/tty || true
   [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
   api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
