@@ -27,7 +27,7 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - **Mexeu no formato do pacote?** Atualize o **`cdmoj/docs/PACOTE.md`** (fonte única) no mesmo commit;
   o `README.md` daqui só resume e aponta p/ ele — não redescreva o formato (a divergência de cópias
   já gerou o bug do título vazio).
-- **Camadas**: `moj` (autoria de problemas) + `moj-contest` (gestão de contest) + `moj-judges`
+- **Camadas** (QUATRO executáveis): `moj` (autoria de problemas) + `moj-contest` (gestão de contest) + `moj-comp` (competidor/aluno, com o modo OFFLINE assinado) + `moj-judges`
   (gerência fina dos juízes: slots/particionamento, config por juiz, relatório de correções —
   sessão `.admin` do treino) compartilham o núcleo SOURCED `lib/core.sh` (config/env,
   `api()`/cache/`http_code`/`api_post_file`, e o **token POR CONTEST** em
@@ -35,7 +35,7 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   delega ao executável `moj-<camada>` (ao lado do script ou no PATH) — padrão p/ camadas
   futuras. `bash -euo pipefail` em todos; `bash -n` antes de commitar.
 - **Distribuição continua de 1 arquivo**: `bash mkdist.sh` embute a lib nos artefatos
-  `dist/{moj,moj-contest,moj-judges}` (marcadores `# @INLINE-BEGIN/END`); são ELES que o cdmoj
+  `dist/{moj,moj-contest,moj-judges,moj-comp}` (marcadores `# @INLINE-BEGIN/END`); são ELES que o cdmoj
   serve em `web/moj*` (ver `cdmoj/docs/DEPLOY.md`). Nunca copie o script do repo direto.
   **O `make deploy` do cdmoj sincroniza sozinho** (alvo `cli-dist` roda o mkdist do checkout
   irmão e copia o que divergir) — mudou a CLI, o próximo deploy embarca.

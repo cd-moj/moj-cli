@@ -1,5 +1,5 @@
 #!/bin/bash
-# mkdist.sh — gera dist/{moj,moj-contest} AUTO-CONTIDOS: troca o bloco entre os marcadores
+# mkdist.sh — gera dist/{moj,moj-contest,moj-judges,moj-comp} + dist/moj.build AUTO-CONTIDOS: troca o bloco entre os marcadores
 # `# @INLINE-BEGIN` e `# @INLINE-END` pelo conteúdo de lib/core.sh. Mantém a instalação por
 # curl de UM arquivo (servidos como cdmoj/web/moj e cdmoj/web/moj-contest — ver
 # cdmoj/docs/DEPLOY.md). Roda bash -n em cada artefato.

@@ -25,6 +25,13 @@ Para a camada de **gestão de contest** (`moj contest …` / `moj-contest`), bai
 curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest
 ```
 
+Para a CLI do **competidor/aluno** (`moj comp …` / `moj-comp` — a que vai para as máquinas da
+prova, e a única com o **modo offline**):
+
+```bash
+curl -fsSL https://moj.naquadah.com.br/moj-comp -o ~/.local/bin/moj-comp && chmod +x ~/.local/bin/moj-comp
+```
+
 Para a camada de **gerência de juízes** (`moj judges …` / `moj-judges`, só admin):
 
 ```bash
@@ -43,7 +50,7 @@ curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && 
 (Os arquivos servidos são auto-contidos — gerados por `mkdist.sh` a partir de `lib/core.sh` +
 cada camada. Rodando do repo, os scripts sourceiam `lib/core.sh` direto.)
 
-Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`. Para testar local:
+Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`, `MOJ_CONFIG_DIR` (onde ficam token e cache), `MOJ_CONTEST` (= o `-c` do `moj-contest`/`moj-comp`), `MOJ_HOST` (header `Host`, p/ teste local) e `MOJ_NO_CACHE=1`. Para testar local:
 `export MOJ_URL=http://127.0.0.1:8080 MOJ_HOST=moj.charge.naquadah.com.br`.
 
 ## Editor interativo (recomendado)
@@ -60,7 +67,7 @@ O menu espelha os campos da página — escolha um número/letra para editar:
   1) Título     2) Autor     3) Tags
   4) Enunciado (abre o $EDITOR)   5) Exemplos (N)   6) Testes ocultos (M)
   7) Soluções (good/wrong/slow/pass/upcoming)   8) Conf   9) Coleções
-  0) Público    r) Compartilhar pasta    v) Pré-visualizar
+  0) Público    L) Linguagens    r) Compartilhar pasta    v) Pré-visualizar
   w) SALVAR (push)   P) Validar & Publicar   i) Info/validação   q) Sair
 ```
 
@@ -85,11 +92,13 @@ bruta; `9) Coleções` marca o problema em coleções (tags) existentes ou cria 
 | `moj preview [dir]` | renderiza o enunciado em HTML (abre no navegador) |
 | `moj download <id> [arq] [--sha <sha>]` · `moj upload <id> [dir\|arq] [--force]` | baixa/sobe o pacote inteiro (`--sha` = a versão daquele commit); **`upload` de um DIRETÓRIO empacota sozinho** (exclui `.git`/caches/`.moj-id` — mas **sintetiza** um `.moj-meta.json` com título/coleções/**languages** do `.moj-id`, então um clone sobe completo) — formatos `.tar.gz`/`.tar.bz2`/`.tar.zst`/`.zip`. No servidor: meta ausente/`[]` ⇒ preserva; tar **sem** o arquivo `tags` ⇒ tags preservadas |
 | `moj languages <dir> [c,cpp,py,…\|all]` | **whitelist de linguagens de submissão** do problema (sem args: mostra; `all` = todas as padrão). Grava no `.moj-id`; aplica no próximo `push` (ou no `upload`, via meta sintetizado). **Obrigatória em problema de função/ban** — sem ela, trocar de linguagem burla o driver |
+| `moj export <id> [arq.tar.gz]` · `moj import <pacote> <pasta> [prob]` | **pacote ICPC/Kattis**: exporta o problema no formato padrão e importa um pacote Kattis como problema MOJ (round-trip sem perda pelo `.kattis.json`) |
+| `moj rm <id>` | **remove** o problema (do acervo e do treino); pede confirmação repetindo o id |
 | `moj log <id> [-n N]` · `moj log <id> <sha>` | **histórico git** do problema (todo save/upload é um commit); com `<sha>`, mostra o `git show -p` (pagine com `\| less -R`) |
 | `moj restore <id> <sha>` | restaura a versão do commit como um **commit NOVO** (história preservada; público/coleções intactos); confirma repetindo o sha |
-| `moj validate <id>` | **portão de qualidade sem publicar**: valida (enunciado/testes/soluções) **e (RE)ENFILEIRA calibração** no juiz. O problema **continua privado** — é o comando para prova em elaboração. ⚠ Não use como "ver status": cada chamada re-dispara calibração — p/ só CONSULTAR use `moj status`/`check` (read-only) |
-| `moj public <id> on\|off` · `moj publish <id>` · `moj calibrate <id> [--hosts h1,h2\|--all-judges\|--per-cpu]` \| `--judges` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar — **direcionada** como na web: `--hosts` nos juízes citados (desconhecido = erro com a lista; offline = aviso e espera), `--all-judges` em todos os online, `--per-cpu` em 1 juiz online por modelo de CPU; `--judges` lista o parque (host/CPU/online); repetir NÃO duplica (`already_queued` por host); **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
-| `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
+| `moj validate <id> [--no-wait]` | **portão de qualidade sem publicar** (por padrão ESPERA o relatório sair — ~1 min — e já imprime o `moj check`; `--no-wait` solta): valida (enunciado/testes/soluções) **e (RE)ENFILEIRA calibração** no juiz. O problema **continua privado** — é o comando para prova em elaboração. ⚠ Não use como "ver status": cada chamada re-dispara calibração — p/ só CONSULTAR use `moj status`/`check` (read-only) |
+| `moj public <id> on\|off [--yes]` · `moj publish <id> [--yes]` · `moj calibrate <id> [--hosts h1,h2\|--all-judges\|--per-cpu]` \| `--judges` \| `--all-stale` | publicar (público => o servidor **valida + calibra**; a ORG precisa permitir) / calibrar — **direcionada** como na web: `--hosts` nos juízes citados (desconhecido = erro com a lista; offline = aviso e espera), `--all-judges` em todos os online, `--per-cpu` em 1 juiz online por modelo de CPU; `--judges` lista o parque (host/CPU/online); repetir NÃO duplica (`already_queued` por host); **`--all-stale` recalibra o LOTE inteiro** dos seus problemas que "precisam recalibrar" (o servidor recomputa a lista e enfileira com dedup+serialização) |
+| `moj status [<id>]` · `moj check <id>` | sem id: saúde do sistema; com id: **QA do problema** (validação, TL por juiz, solução `good` sem TL / falhou em todas as máquinas); quando o pacote tem `TLOVERRIDE` no conf, mostra o aviso **⚙ TL OVERRIDE (vence o calibrado)** — sem ele você olharia o TL calibrado achando que é o que vale; e quando precisa recalibrar mostra o **PORQUÊ** (quando calibrou, checksums e os commits que afetam o TL desde então) |
 | `moj board` | painel dos seus problemas: público/validado/calibrado + o que **precisa revisar** |
 | `moj calib <id>` | a calibração **POR EXTENSO**: cada juiz, cada solução (`good/pass/slow/wrong`), cada teste `{name,code,time,tl}` — o mesmo formato do resultado de submissão. Com `--json`, o JSON cru (campo `sols` por host) p/ integrar com ferramentas externas; juiz antigo sem o vetor cai no log texto |
 | `moj calib-report <id> [--host <juiz> --sol <nome>] [-o out.html]` | baixa o **report.html** de uma solução da calibração; sem `--host/--sol` **lista** os disponíveis |
@@ -175,7 +184,7 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `list` · `show <cid>` | seus contests · resumo de um |
 | `export <cid> [arq] [--full]` · `duplicate <cid> [--id --name --start --end]` | spec p/ arquivo (sem credenciais) · cópia (sem usuários) |
 | `template list\|show\|save <nome> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | templates nomeados no servidor |
-| `settings get` · `settings set k=v …` · `extend <+min\|epoch>` | configurações do contest (penalidade ICPC: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce` — vírgulas; vazio = nenhum penaliza; pool de juízes: `judges=cpu1,cpu2` — vazio = qualquer juiz online) |
+| `settings get` · `settings set k=v …` · `extend <+min\|epoch> [--group <regex> [--reason <txt>]]` | configurações do contest (penalidade ICPC: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce` — vírgulas; vazio = nenhum penaliza; pool de juízes: `judges=cpu1,cpu2` — vazio = qualquer juiz online) |
 | `problems ls\|add <id>\|rm <letra>\|rename\|reorder\|langs <letra> <l1,l2\|->\|judges <letra> <h1,h2\|->` | problemas do contest (`langs -`/`judges -` = volta a herdar do contest) |
 | `problems search <q> [--collection C]` · `problems draw [--collections "A,B"] [--tags a,b] [--count N] [--difficulty d] [--seed s] [--add]` | banco público: busca e **sorteio por coleção/tag/dificuldade** (`--add` já adiciona) |
 | `users ls\|add\|reset\|rm\|disable\|logout <login>\|set-password-all <senha>` | usuários (troca geral pede confirmação) |
@@ -188,7 +197,7 @@ contest** (`moj-contest login <cid>` com uma conta `*.admin` do contest — toke
 | `cohorts ls` · `cohorts add <id> [--regex R] [--private] [--unranked]` · `cohorts assign <login> <id>` · `cohorts materialize` · `cohorts release` | **coortes de placar**: times oficiais × **convidados** (extra-oficiais/"CCL"). Coorte privada não aparece no placar público nem no diretório de times, e os regulares não sabem que existe; os convidados veem todos. `--unranked` = entra intercalado sem consumir posição oficial. `release` é o "liberamos tudo" (pede o id do contest) |
 | `machines [--round <slug>] [--csv]` | **time × IP × User-Agent** da rodada: é no aquecimento que os times ligam as máquinas. Marca quem trocou de máquina depois e sugere a substring comum p/ o gate de navegador |
 | `ua-gate show` · `ua-gate check <login>` | o **gate de navegador por sede**: `show` lista as regras vigentes (isentos › regex › região › derivado do login › fallback) e `check <login>` diz qual pedaço de User-Agent o MOJ espera daquele time — é como se descobre, antes da prova, que a imagem de uma sede vai barrar todo mundo |
-| `docs ls` · `docs gen [info\|caderno\|times…] [--lang pt\|en\|es\|both\|all]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML, nos três idiomas |
+| `docs ls` · `docs gen [info\|caderno\|times\|editorial…] [--lang pt\|en\|es\|both\|all]` | **documentos da prova**: lista e gera info sheet, caderno e folha de time limits, em PDF **e** HTML, nos três idiomas |
 | `docs get <info\|caderno\|times\|all> [--lang …] [--fmt pdf\|html] [-o arq]` | baixa (a sede usa este: `ls`/`get` funcionam com QUALQUER conta do contest, e só enxergam o que foi **publicado**) |
 | `docs publish <tipo> [--lang pt] [--news]` · `docs unpublish <tipo>` | libera p/ a sede e p/ a seção "Prova" do contest; `--news` cria a notícia com o PDF anexo |
 | `docs cover <capa.pdf> [--lang pt]` · `docs cover --rm` | capa do caderno em **PDF enviado** (vence a editada/gerada) |
@@ -254,6 +263,6 @@ compartilhada (laboratório), outro usuário rodando `ps` vê só o caminho do a
 
 ## Saída crua (--json)
 
-`moj --json <ls|board|status|check|calib|calibrate|testrun|testrun-status> …` imprime a resposta da API sem
+`moj --json <ls|board|status|check|calib|calibrate|testrun|testrun-status|log|restore> …` imprime a resposta da API sem
 formatação (scripts/pipelines); no `moj-contest` a flag global `--json` já existia e continua
 igual (agora ambos usam o mesmo `out()`).

@@ -44,8 +44,6 @@
 #                                  rename/delete acompanham o re-tag até o fim — --no-wait solta)
 #   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
 #   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
-#   moj collection ls | create <nome> [--members a,b] [--admins c]
-#                  | members <nome> [--add a,b] [--remove c] [--admins-add d] [--admins-remove e]
 #   moj contest …                 (GESTÃO DE CONTEST — delega ao moj-contest; `moj contest help`)
 # Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local),
 #         EDITOR (editor de texto; default nano/vi).
@@ -1166,6 +1164,6 @@ case "$cmd" in
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
   languages|langs|lang) cmd_languages "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
-  help|-h|--help) sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//';;
+  help|-h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;
 esac
