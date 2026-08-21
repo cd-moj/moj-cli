@@ -505,7 +505,7 @@ cmd_testrun(){ need_login
   # corpo por ARQUIVO (fonte grande nunca anda por argv)
   local b64f bodyf resp run
   b64f="$(mktemp)"; bodyf="$(mktemp)"
-  base64 -w0 "$sol" > "$b64f" 2>/dev/null || base64 "$sol" | tr -d '\n' > "$b64f"
+  _b64enc "$sol" > "$b64f"          # -w0/arquivo-posicional são GNU: no BSD as DUAS pontas falham
   jq -cn --arg id "$id" --arg f "$(basename "$sol")" --rawfile b "$b64f" \
     '{id:$id, filename:$f, code_b64:$b}' > "$bodyf"
   rm -f "$b64f"
@@ -864,7 +864,7 @@ cmd_log(){ need_login; [[ $# -ge 1 ]] || die "uso: moj log <id> [-n N] | moj log
     local j; j="$(api GET "/problems/history?id=$(enc "$id")&sha=$sha")"
     [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
     jq -r '"commit \(.sha)\nautor:  \(.author)\ndata:   \(.at|strftime("%Y-%m-%d %H:%M UTC"))\n"' <<<"$j"
-    jq -r '.diff_b64' <<<"$j" | base64 -d
+    jq -r '.diff_b64' <<<"$j" | _b64dec
     [[ "$(jq -r '.truncated' <<<"$j")" == true ]] && echo "… (diff truncado em 400 KB)"
     return 0
   fi
