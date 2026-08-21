@@ -193,7 +193,7 @@ cmd_statement(){ need_contest; local ref="${1:-}"
     [[ $rc -ne 0 ]] && die "problema '$ref' não achado (o id é org#slug — busque com: $MOJ_TOOL problems <busca>)"
     jq -e '.statement_html_b64 // empty | length > 0' >/dev/null 2>&1 <<<"$r" || die "problema '$ref' sem enunciado servível"
     out="./${ref##*#}.html"
-    jq -r '.statement_html_b64' <<<"$r" | base64 -d > "$out"
+    jq -r '.statement_html_b64' <<<"$r" | _b64dec > "$out"
     echo "enunciado: $out  ($(jq -r '.title // ""' <<<"$r"))  — abra no navegador"
     return 0
   fi
