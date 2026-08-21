@@ -54,6 +54,18 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - **`moj test --run` só se testa DE VERDADE em máquina com bwrap REAL** (o dev tem fbwrap e morre
   antes do caminho de julgamento — use o juiz de produção como bancada: copie o pacote + mojtools
   p/ ~ribas e rode com `CAGE_ROOT` apontando p/ a rootfs).
+- **PORTABILIDADE: a CLI roda na máquina do USUÁRIO, e ela pode ser um Mac.** O dev e o servidor
+  são Linux, então flag só-GNU passa despercebida aqui e quebra lá — já aconteceu três vezes
+  (o `awk` de locale abaixo, e o `base64` do `testrun`/`log`/`comp statement`, que veio por PR de
+  fora: no BSD não há `-w0` nem arquivo posicional, e com `set -euo pipefail` o comando morria com
+  rc=64 — no caminho em que não morria, mandava `code_b64:""` p/ o servidor).
+  **A `lib/core.sh` é a camada que embrulha essas diferenças** — use os helpers dela em vez de
+  escrever a alternativa à mão: `_b64enc <arq>` / `_b64dec` (stdin), `_date2epoch`, `_mtime`,
+  `_hash`, `_abspath`. A ÚNICA exceção legítima é a resolução do próprio caminho
+  (`readlink -f … || echo "$BASH_SOURCE"`), que roda ANTES de a lib existir.
+  Guarda: **`bash test/portabilidade.sh`** — varre os quatro executáveis atrás de flag só-GNU
+  **sem fallback** e roda os helpers com um `base64`/`date` de BSD simulados no PATH. Rode junto
+  com o `bash -n` antes de commitar.
 - Pegadinha de LOCALE: a CLI roda na máquina do USUÁRIO — awk numérico SEM `LC_ALL=C` quebra em
   pt_BR: no mawk (o awk default do Ubuntu) `"0.21"+0 == 0` (strtod espera vírgula) e `%f` imprime
   vírgula (foi o "pior 0,00s" do relato do Edson; gawk não reproduz — ignora locale sem

@@ -29,6 +29,19 @@ have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
 _b64enc(){ base64 -w0 < "$1" 2>/dev/null || base64 < "$1" | tr -d '\n'; }
 # decode de base64 do stdin (GNU: -d; macOS/BSD: -D)
 _b64dec(){ if base64 -d </dev/null >/dev/null 2>&1; then base64 -d; else base64 -D; fi; }
+# epoch de uma data legível. GNU: `date -d` aceita quase tudo. BSD/macOS NÃO tem `-d` — tem
+# `-j -f <formato>`, que EXIGE o formato exato, então tentamos os que a CLI documenta.
+# ⚠ O ramo GNU vem PRIMEIRO: no Linux o resultado é o de sempre, byte a byte.
+# ⚠ No BSD, formato só-data ("YYYY-MM-DD") herda a HORA ATUAL (o GNU usa 00:00) — por isso a
+# forma documentada leva HH:MM, e é a que casa igual nos dois.
+_date2epoch(){
+  local v="$1" e f
+  e="$(date -d "$v" +%s 2>/dev/null)" && [[ -n "$e" ]] && { printf '%s' "$e"; return 0; }
+  for f in '%Y-%m-%d %H:%M:%S' '%Y-%m-%d %H:%M' '%Y-%m-%d'; do
+    e="$(date -j -f "$f" "$v" +%s 2>/dev/null)" && [[ -n "$e" ]] && { printf '%s' "$e"; return 0; }
+  done
+  return 1
+}
 # mtime em epoch (GNU stat -c %Y; BSD stat -f %m)
 _mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 # hash curto de uma string (md5sum GNU; md5 -q BSD; shasum último recurso)
