@@ -12,7 +12,10 @@
 # São DOIS modos, e nenhum basta sozinho:
 #   ESTÁTICO — procura flag que só existe no GNU nos quatro executáveis. A `lib/core.sh` é
 #              ISENTA: ela é justamente a camada que embrulha essas diferenças (`_b64enc`,
-#              `_b64dec`, `_mtime`, `_hash`, `_abspath`). Fora dela, use o helper.
+#              `_b64dec`, `_date2epoch`, `_mtime`, `_hash`, `_abspath`). Fora dela, use o helper.
+#              ⚠ Roda tanto no repo quanto no ARTEFATO de dist — e no artefato a lib está
+#              EMBUTIDA, então o bloco entre `@INLINE-BEGIN`/`@INLINE-END` é pulado; sem isso a
+#              própria implementação do `_abspath` aparece como violação.
 #   BSD FALSO — põe na frente do PATH um `base64` que se comporta como o da Apple antigo (sem
 #              `-w`, sem arquivo posicional, sem `-d`; decodifica com `-D`) e prova o round-trip
 #              pelos helpers. É o mais próximo de um Mac que se consegue sem um Mac.
@@ -50,7 +53,28 @@ tem_fallback(){ # <linha> <ferramenta> — a alternativa IMEDIATA da ferramenta 
   resto="${1#*$t}"
   [[ "$resto" == *"||"* ]] || return 1
   alt="${resto#*||}"
-  [[ "$alt" == *"$t"* || "$alt" == *echo* || "$alt" == *printf* ]]
+  # vale como substituto: a mesma ferramenta com a flag do BSD, um echo/printf, ou um helper da
+  # própria core.sh (ex.: `readlink -f … || _abspath "$0"`)
+  [[ "$alt" == *"$t"* || "$alt" == *echo* || "$alt" == *printf* || "$alt" == *_abspath* \
+     || "$alt" == *_b64* || "$alt" == *_mtime* || "$alt" == *_hash* || "$alt" == *_date2epoch* ]]
+}
+# Corpo do executável SEM a camada de fallback. No REPO ela é o bloco `@INLINE-*`; no ARTEFATO
+# o mkdist TIRA os marcadores, então o corte é pelas FUNÇÕES que a core.sh define — a
+# implementação delas (`readlink -f … ; return`, `date -d …`) é a camada de compatibilidade, não
+# uso indevido. ⚠ As linhas removidas viram VAZIAS, não somem: o `grep -n` depois relata o número
+# de linha do arquivo de verdade (na 1ª versão elas sumiam e o número saía deslocado).
+sem_lib(){
+  local core="$CLI/lib/core.sh" fns=""
+  [[ -f "$core" ]] && fns="$(grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*\(\)' "$core" | tr -d '()' | paste -sd'|' -)"
+  awk -v fns="$fns" '
+    BEGIN{ if (fns != "") re = "^(" fns ")\\(\\)" }
+    /@INLINE-BEGIN/ { s=1 }
+    /@INLINE-END/   { s=0; print ""; next }
+    {
+      if (!s && re != "" && $0 ~ re) inf=1
+      if (s || inf) { print "" } else { print }
+      if (inf && /^\}/) inf=0
+    }' "$1"
 }
 achou=0
 for f in "$CLI"/moj "$CLI"/moj-comp "$CLI"/moj-contest "$CLI"/moj-judges; do
@@ -65,7 +89,7 @@ for f in "$CLI"/moj "$CLI"/moj-comp "$CLI"/moj-contest "$CLI"/moj-judges; do
       printf '  ACHADO %s:%s\n         %s\n         %s\n' \
         "$(basename "$f")" "$n" "${GNU[$pat]}" "$(printf '%s' "$linha" | sed 's/^[[:space:]]*//' | cut -c1-90)"
       achou=$((achou+1))
-    done < <(grep -nE "$pat" "$f" 2>/dev/null)
+    done < <(sem_lib "$f" | grep -nE "$pat" 2>/dev/null)
   done
 done
 chk "nenhuma flag só-GNU SEM fallback nos executáveis" "[[ $achou -eq 0 ]]"
