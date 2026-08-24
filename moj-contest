@@ -55,6 +55,8 @@
 #      time — teambrspso001 -> "brspso". `--from-login` cobre todas as sedes de uma vez;
 #      `--region` é o override de sede com imagem fora do padrão; `--exempt` é a margem.
 #      `check` diz o esperado de um time sem ele precisar logar.)
+#   moj-contest -c <cid> seed [--teams N] [--subs N] [--seed S] [--freeze-minute M] [--live N]
+#     (só em contest DEMO=1: povoa placar/veredictos sintéticos p/ quem desenvolve telão)
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|es|both|all]
@@ -742,6 +744,73 @@ cmd_ua_gate(){ need_contest; need_login; local sub="${1:-show}"; shift || true
     *) die "ua-gate: sub desconhecido '$sub' (show|set|check)";;
   esac; }
 
+# ---- semear contest de DEMONSTRAÇÃO (para quem desenvolve telão/placar) --------------------
+# `seed` povoa um contest DEMO=1 com times e submissões sintéticas (rota /contest/admin/seed);
+# `seed --live N` manda N submissões DE VERDADE pela API, para o placar se mexer na tela.
+cmd_seed(){ need_contest; need_login
+  local teams="" subs="" sd="" fz="" win="" pw="" live="" a body='{}'
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      --teams)   teams="$1"; shift;; --subs|--submissions) subs="$1"; shift;;
+      --seed)    sd="$1"; shift;;    --freeze-minute) fz="$1"; shift;;
+      --window-minutes) win="$1"; shift;; --password) pw="$1"; shift;;
+      --live)    live="$1"; shift;;
+      *) die "opção desconhecida: $a";;
+    esac
+  done
+  if [[ -n "$live" ]]; then _seed_live "$live" "${pw:-demo1234}"; return; fi
+  local k
+  for k in teams:$teams submissions:$subs seed:$sd freeze_minute:$fz window_minutes:$win; do
+    [[ -n "${k#*:}" ]] || continue
+    [[ "${k#*:}" =~ ^[0-9]+$ ]] || die "${k%%:*} espera número"
+    body="$(jq -c --arg n "${k%%:*}" --argjson v "${k#*:}" '.[$n]=$v' <<<"$body")"
+  done
+  [[ -n "$pw" ]] && body="$(jq -c --arg v "$pw" '.password=$v' <<<"$body")"
+  api POST "/contest/admin/seed$(qc)" "$body" \
+    | out '"semeado: \(.teams_created) time(s) novo(s), \(.submissions) submissão(ões), placar com \(.board_lines) linha(s)"
+           + (if .freeze_time then "  freeze em \(.freeze_time)" else "" end)
+           + "\n  veredictos: " + ([.by_verdict | to_entries[] | "\(.key)=\(.value)"] | join("  "))
+           + "\n  senha dos times: \(.password)"'; }
+
+# _seed_live <n> <senha> — submissões DE VERDADE (passam pelo juiz) como os times semeados.
+# Programas canônicos do roteiro de ensaio: acerta, erra, e um que estoura o tempo. É o que faz
+# o placar se MEXER na tela de quem está desenvolvendo o telão — o resto do seed é histórico.
+# ⚠ o token de cada time vai por ARQUIVO de header (`curl -H @arquivo`), nunca no argv: em
+# máquina de laboratório o `ps` de qualquer usuário mostraria o Bearer.
+_seed_live(){
+  local n="$1" pw="$2" i tok tmp hdrf b64 r
+  [[ "$n" =~ ^[0-9]+$ ]] || die "--live espera número"
+  local -a LET PRG
+  LET=(A B C D)
+  PRG=('#include <stdio.h>
+int main(void){ printf("Ola Mundo\\n"); return 0; }'
+       '#include <stdio.h>
+int main(void){ int a,b; if(scanf("%d %d",&a,&b)!=2) return 1; printf("%d\\n",a-b); return 0; }'
+       '#include <stdio.h>
+int main(void){ int n,s=0,x; if(scanf("%d",&n)!=1) return 1; while(n--){ if(scanf("%d",&x)==1) s+=x; } printf("%d\\n",s); return 0; }'
+       '#include <stdio.h>
+int main(void){ for(;;); return 0; }')
+  hdrf="$(mktemp)"; chmod 600 "$hdrf"
+  for ((i=1; i<=n; i++)); do
+    local login; login="$(printf 'time-%02d' $(( (i - 1) % 20 + 1 )))"
+    tok="$(jq -n --arg u "$login" --arg p "$pw" '{username:$u,password:$p}' \
+           | curl -sS "${HDR[@]}" -X POST -H 'Content-Type: application/json' --data-binary @- \
+                  "$MOJ_URL/api/v1/auth/login?contest=$(enc "$CONTEST")" 2>/dev/null \
+           | jq -r '.token // empty')"
+    [[ -n "$tok" ]] || { echo "  $login: login falhou (a senha é a que o seed devolveu)" >&2; continue; }
+    printf 'Authorization: Bearer %s\n' "$tok" > "$hdrf"
+    local k=$(( (i - 1) % 4 )); tmp="$(mktemp)"; printf '%s\n' "${PRG[k]}" > "$tmp"
+    b64="$(_b64tmp "$tmp")"
+    r="$(jq -cn --arg p "${LET[k]}" --arg f sol.c --rawfile b "$b64" \
+          '{problem_id:$p, filename:$f, code_b64:($b|rtrimstr("\n"))}' \
+         | curl -sS "${HDR[@]}" -H "@$hdrf" -X POST -H 'Content-Type: application/json' \
+                --data-binary @- "$MOJ_URL/api/v1/submit?contest=$(enc "$CONTEST")" 2>/dev/null)"
+    rm -f "$tmp" "$b64"
+    printf '  %s -> %s: %s\n' "$login" "${LET[k]}" \
+      "$(jq -r '.status // .error.message // "?"' <<<"$r" 2>/dev/null)"
+  done
+  rm -f "$hdrf"; }
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
@@ -758,6 +827,7 @@ case "$cmd" in
   cohorts|coortes) cmd_cohorts "$@";;
   ua-gate|uagate) cmd_ua_gate "$@";;
   machines|maquinas) cmd_machines "$@";;
+  seed|semear) cmd_seed "$@";;
   help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
   *) die "comando desconhecido: $cmd (veja 'moj-contest help')";;
 esac
