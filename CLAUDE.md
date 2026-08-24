@@ -54,6 +54,15 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - **`moj test --run` só se testa DE VERDADE em máquina com bwrap REAL** (o dev tem fbwrap e morre
   antes do caminho de julgamento — use o juiz de produção como bancada: copie o pacote + mojtools
   p/ ~ribas e rode com `CAGE_ROOT` apontando p/ a rootfs).
+- **CONTEÚDO DE ARQUIVO NUNCA ANDA POR ARGV DO `jq`.** O Linux limita **um argumento** a
+  **128 KiB**, e o erro é na cara do usuário: `/usr/bin/jq: Argument list too long`. Aconteceu em
+  2026-08-24 no `moj-contest docs upload caderno <pdf>` — um caderno de 500 KB vira 665 KB em
+  base64 (o `moj` e o `moj-comp` já usavam `--rawfile`; o `moj-contest` tinha TRÊS pontos que
+  não: upload, cover e `docs text --from`). Regra: base64/markdown/código vão por
+  **`--rawfile <arquivo>`** (helper `_b64tmp` em `lib/core.sh`), nunca por `--arg "$(…)"`. É a
+  mesma classe do servidor (ver `cdmoj/CLAUDE.md`), e o guarda é `test/argmax.sh`, que roda os
+  corpos de verdade com carga acima do teto **e** faz o inventário do padrão proibido nos quatro
+  executáveis.
 - **PORTABILIDADE: a CLI roda na máquina do USUÁRIO, e ela pode ser um Mac.** O dev e o servidor
   são Linux, então flag só-GNU passa despercebida aqui e quebra lá — já aconteceu três vezes
   (o `awk` de locale abaixo, e o `base64` do `testrun`/`log`/`comp statement`, que veio por PR de

@@ -27,6 +27,11 @@ have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
 # ---- helpers PORTÁVEIS (Linux/GNU e macOS/BSD) --------------------------------------------
 # base64 de um arquivo, SEM quebra de linha (GNU: -w0; BSD não tem -w e não quebra por default)
 _b64enc(){ base64 -w0 < "$1" 2>/dev/null || base64 < "$1" | tr -d '\n'; }
+# _b64tmp <arquivo> -> ecoa o caminho de um TEMP com o base64 do arquivo, p/ entrar no jq por
+# `--rawfile`. ⚠ NUNCA passe base64 por `--arg`: o Linux limita um argumento a 128 KiB e um PDF
+# de caderno (500 KB -> 665 KB em base64) mata o jq com "Argument list too long" — o mesmo
+# tropeço que o /submit e o /contest/admin/users já levaram no servidor. Quem chama apaga.
+_b64tmp(){ local t; t="$(mktemp)" || return 1; _b64enc "$1" > "$t" || { rm -f "$t"; return 1; }; printf '%s' "$t"; }
 # decode de base64 do stdin (GNU: -d; macOS/BSD: -D)
 _b64dec(){ if base64 -d </dev/null >/dev/null 2>&1; then base64 -d; else base64 -D; fi; }
 # epoch de uma data legível. GNU: `date -d` aceita quase tudo. BSD/macOS NÃO tem `-d` — tem

@@ -441,7 +441,9 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       else
         [[ -f "$file" ]] || die "uso: docs cover <arquivo.pdf> [--lang pt]   (ou --rm)"
         local tmp; tmp="$(mktemp)"
-        jq -cn --arg l "$l" --arg b "$(_b64enc "$file")" '{action:"cover",lang:$l,pdf_b64:$b}' > "$tmp"
+        local b64; b64="$(_b64tmp "$file")" || die "não consegui codificar $file"
+        jq -cn --arg l "$l" --rawfile b "$b64" '{action:"cover",lang:$l,pdf_b64:($b|rtrimstr("\n"))}' > "$tmp"
+        rm -f "$b64"
         api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"capa enviada ('"$l"'): \(.bytes) bytes — gere o caderno de novo"'
         rm -f "$tmp"
       fi;;
@@ -460,7 +462,10 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       else
         [[ -f "$file" ]] || die "uso: docs upload <tipo> <arquivo.pdf> [--lang pt|en|es]   (ou --rm)"
         local tmp; tmp="$(mktemp)"
-        jq -cn --arg t "$t" --arg l "$l" --arg b "$(_b64enc "$file")" '{action:"upload",type:$t,lang:$l,pdf_b64:$b}' > "$tmp"
+        local b64; b64="$(_b64tmp "$file")" || die "não consegui codificar $file"
+        jq -cn --arg t "$t" --arg l "$l" --rawfile b "$b64" \
+          '{action:"upload",type:$t,lang:$l,pdf_b64:($b|rtrimstr("\n"))}' > "$tmp"
+        rm -f "$b64"
         api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"PDF enviado ('"$t.$l"'): \(.bytes) bytes — é ele que os times baixam"'
         rm -f "$tmp"
       fi;;
@@ -493,9 +498,14 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       case "$mode" in
         show) api GET "/contest/admin/docs$(qc)" | jq -r --arg w "$which" --arg l "$l" --arg k "$key" '(.templates[$w][$l]? // .templates[$k]) // ""';;
         reset) api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg k "$key" '{action:"config"} + {($k):""}')" | out '"texto '"$key"' voltou ao padrão"';;
-        set) local txt tmp
-          if [[ "$src" == - ]]; then txt="$(cat)"; else [[ -f "$src" ]] || die "arquivo não existe: $src"; txt="$(cat "$src")"; fi
-          tmp="$(mktemp)"; jq -cn --arg k "$key" --arg v "$txt" '{action:"config"} + {($k):$v}' > "$tmp"
+        set) local tmp srcf=""
+          # o texto vai por --rawfile (arquivo), nunca por --arg: markdown com imagem colada
+          # em data:URI passa fácil dos 128 KiB de um argumento.
+          if [[ "$src" == - ]]; then srcf="$(mktemp)"; cat > "$srcf"
+          else [[ -f "$src" ]] || die "arquivo não existe: $src"; srcf="$src"; fi
+          tmp="$(mktemp)"
+          jq -cn --arg k "$key" --rawfile v "$srcf" '{action:"config"} + {($k):($v|rtrimstr("\n"))}' > "$tmp"
+          [[ "$src" == - ]] && rm -f "$srcf"
           api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"texto '"$key"' salvo"'; rm -f "$tmp";;
       esac;;
     *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|upload|set|text)";;
