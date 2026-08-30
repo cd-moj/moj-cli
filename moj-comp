@@ -330,7 +330,22 @@ cmd_score(){ need_contest
   _is_treino && die "o treino livre não tem placar — suas estatísticas estão no site (/treino)."
   local r
   r="$(_api_net GET "/contest/score$(qc)")" || die "sem rede."
-  _anchor >/dev/null 2>&1 & tail -n +2 <<<"$r"; wait; }
+  _anchor >/dev/null 2>&1 &
+  # linha 1 `icpc s` (2026-08-30) = célula em SEGUNDOS; o terminal exibe minutos, como a
+  # web. Colunas de problema = 6..NF-3 (flag:username:univ short:team name:univ full à
+  # esquerda; Total:Penalty:LastAC[:guest] à direita) — só elas são convertidas, então
+  # nome de time com "/" não é tocado. TXT sem a flag passa cru (minutos, legado).
+  if [[ "$(head -n1 <<<"$r")" == "icpc s" ]]; then
+    tail -n +2 <<<"$r" | awk -F: '
+      NR==1 { print; hg = ($0 ~ /:guest$/); next }
+      { last = NF - 3 - (hg ? 1 : 0)
+        for (i = 6; i <= last; i++) if ($i ~ /^[0-9]+\/[0-9]+\*?$/) {
+          star = ($i ~ /\*$/) ? "*" : ""; split($i, a, "/"); sub(/\*$/, "", a[2])
+          $i = a[1] "/" int(a[2] / 60) star
+        }
+        out = $1; for (i = 2; i <= NF; i++) out = out ":" $i; print out }'
+  else tail -n +2 <<<"$r"; fi
+  wait; }
 cmd_news(){ need_contest; _contest_only news; need_login
   api GET "/contest/news$(qc)" | jq -r '.news[]? | "— \(.title // "")\n\(.text // .body // "")\n"'; }
 cmd_clar(){ need_contest; _contest_only clar; need_login
