@@ -20,6 +20,9 @@
 #   problems <busca> · statement <org#slug> · submit <org#slug> <arquivo> · subs
 # Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_CONTEST (= -c). Requisitos:
 # bash, curl, jq, openssl. Sem root, sem instalação: um arquivo.
+# PROVA COM GATE DE NAVEGADOR: rode a CLI na máquina de prova — ela manda o mesmo User-Agent
+# do navegador da imagem (lido de /etc/moj/user-agent; MOJ_UA_FILE/MOJ_USER_AGENT mudam),
+# marcado como "moj-comp/<build>" (a organização vê o que veio da CLI e o que veio da web).
 # @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
 _moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 _MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
@@ -428,6 +431,9 @@ cmd_doctor(){ local bad=0 srv
     || echo "✓ build $( [[ -n "$srv" ]] && echo "ok (servidor: $srv)" || echo "$MOJ_CLI_BUILD (servidor indisponível)")"
   have jq || { echo "✗ jq AUSENTE"; bad=1; }
   have curl || { echo "✗ curl AUSENTE"; bad=1; }
+  # o UA que vai nas requisições: com o da máquina de prova na frente, a CLI passa no gate da sede
+  if [[ -n "$MOJ_UA_BASE" ]]; then echo "✓ User-Agent da máquina de prova: $MOJ_UA"
+  else echo "· User-Agent: $MOJ_UA (sem ${MOJ_UA_FILE:-/etc/moj/user-agent}: em prova com gate de navegador, só entra da máquina de prova)"; fi
   if have openssl; then echo "✓ openssl $(openssl version 2>/dev/null | awk '{print $2}') — modo offline disponível"
   else echo "✗ openssl AUSENTE — o modo offline (queda de Internet) NÃO funciona"; bad=1; fi
   if [[ "$CONTEST_SET" == 1 && -f "$(token_file)" ]]; then echo "✓ sessão: $CONTEST"

@@ -50,7 +50,7 @@ curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && 
 (Os arquivos servidos são auto-contidos — gerados por `mkdist.sh` a partir de `lib/core.sh` +
 cada camada. Rodando do repo, os scripts sourceiam `lib/core.sh` direto.)
 
-Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`, `MOJ_CONFIG_DIR` (onde ficam token e cache), `MOJ_CONTEST` (= o `-c` do `moj-contest`/`moj-comp`), `MOJ_HOST` (header `Host`, p/ teste local) e `MOJ_NO_CACHE=1`. Para testar local:
+Config (opcional): `MOJ_URL` (default `https://moj.naquadah.com.br`), `EDITOR`, `MOJ_CONFIG_DIR` (onde ficam token e cache), `MOJ_CONTEST` (= o `-c` do `moj-contest`/`moj-comp`), `MOJ_HOST` (header `Host`, p/ teste local), `MOJ_NO_CACHE=1`, e o **User-Agent**: toda CLI se apresenta como `<tool>/<build>` e, se existir `/etc/moj/user-agent` (`MOJ_UA_FILE`) ou `MOJ_USER_AGENT`, manda ESSE UA na frente — na máquina de prova é o UA do navegador da imagem da sede, o que faz a CLI passar no **gate de navegador por sede** e ter a mesma chave de máquina do browser (ver `cdmoj/docs/MANUAL-ADMIN.md` §7). O servidor separa pedidos web × CLI por esse marcador. Para testar local:
 `export MOJ_URL=http://127.0.0.1:8080 MOJ_HOST=moj.charge.naquadah.com.br`.
 
 ## Editor interativo (recomendado)
