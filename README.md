@@ -17,7 +17,10 @@ curl -fsSL https://moj.naquadah.com.br/moj -o ~/.local/bin/moj && chmod +x ~/.lo
 Depois disso, **`moj update` atualiza a própria CLI** (baixa os artefatos servidos e troca no
 lugar), `moj version` compara o seu build com o do servidor e **`moj doctor` diagnostica o
 ambiente** (atualização, jq/curl, mojtools, bwrap, sessão) — comece por ele quando algo parecer
-estranho.
+estranho. **A CLI avisa sozinha quando está desatualizada**: o servidor manda `X-Moj-Cli-Status`
+em toda resposta e, se a sua build ficou para trás, aparece um aviso no stderr (uma vez por dia) —
+o comando segue normalmente. Uma CLI de antes de setembro/2026 (sem marcador no User-Agent) recebe
+a mesma dica anexada às mensagens de erro do servidor.
 
 Para a camada de **gestão de contest** (`moj contest …` / `moj-contest`), baixe também:
 
