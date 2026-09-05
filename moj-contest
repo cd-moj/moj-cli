@@ -9,8 +9,12 @@
 #
 #   moj-contest login <cid> [-u login]   moj-contest logout [<cid>]   moj-contest whoami
 #   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E] [--empty]
+#                      [--modules a,b,c]
 #     (a criação exige ao menos UM problema; `--empty` cria a sala vazia — os problemas entram
-#      depois com `-c <cid> problems add`. O contest entra no ar na hora, em qualquer caso.)
+#      depois com `-c <cid> problems add`. O contest entra no ar na hora, em qualquer caso.
+#      `--modules` liga módulos na criação; no spec, a seção `modules{}` leva também os DADOS de
+#      cada módulo — sedes, balões, coortes, gate de UA, rodadas, documentos, inscrições, telão,
+#      classificação. Veja `moj-contest modules`.)
 #   moj-contest list                     (contests criados por você)
 #   moj-contest show <cid>               moj-contest export <cid> [arquivo] [--full]
 #   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]
@@ -21,6 +25,10 @@
 #      penalty_verdicts= [vazio] = nenhum verdict penaliza;
 #      pool de juízes: settings set judges=cpu1,cpu2 — vazio [judges=] = qualquer juiz;
 #      correção manual: settings set manual_verdict=true review_judges=2 [1..5 juízes validam])
+#   moj-contest -c <cid> modules [list] | on <id[,id…]> | off <id[,id…]>
+#     (MÓDULOS = grupos de recursos que o contest liga: sedes, maquinas, rodadas, documentos,
+#      baloes, coortes, inscricoes, telao, classificacao. `list` mostra ligado/dados presentes.
+#      Desligar nunca apaga dado. Prova de disciplina: nenhum; com Maratona Linux: maquinas.)
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
@@ -114,10 +122,11 @@ cmd_whoami(){ need_contest; need_login
 
 # ---- criação / reuso (sessão do treino) ---------------------------------------------------
 cmd_create(){ need_login_t
-  local specf="" tpl="" id="" name="" start="" end="" empty=0 a
+  local specf="" tpl="" id="" name="" start="" end="" empty=0 mods="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in
       --template) tpl="$1"; shift;;
+      --modules) mods="$1"; shift;;
       --id) id="$1"; shift;;
       --name) name="$1"; shift;;
       --start) start="$1"; shift;;
@@ -149,6 +158,12 @@ cmd_create(){ need_login_t
   [[ -n "$end" ]] && spec="$(jq -c --argjson v "$end" '.end=$v' <<<"$spec")"
   # --empty é aplicado DEPOIS do spec/template: a leitura do arquivo (acima) reescreve $spec inteiro
   [[ "$empty" == 1 ]] && spec="$(jq -c '.allow_empty=true' <<<"$spec")"
+  # --modules a,b: liga os ids por cima do spec/template (uma seção já presente só ganha on:true)
+  if [[ -n "$mods" ]]; then
+    [[ "$mods" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "--modules espera ids separados por vírgula (ex.: maquinas,baloes)"
+    spec="$(jq -c --arg m "$mods" '.modules = ((.modules // {}) + (($m|split(",")) | map(select(length>0)) | map({key:., value:true}) | from_entries))
+      | .modules |= with_entries(if (.value|type) == "object" and ($m|split(",")|index(.key)) then .value.on = true else . end)' <<<"$spec")"
+  fi
   [[ "$(jq -r '.end // empty' <<<"$spec")" ]] || die "faltou o fim: --end <epoch> (ou spec/template com end/duration)"
   local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
   CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
@@ -157,7 +172,7 @@ cmd_list(){ need_login_t
   api_t GET "/treino/contest-create/mine" | out '.contests[]? | "\(.id)\t\(.mode)\t\(.problems_count) probs\t\(.name)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_show(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest show <cid>"
   api_t GET "/treino/contest-create/export?id=$(enc "$1")" | out '
-    "id: \(.id)\nnome: \(.name)\nmodo: \(.mode)\(if .priority then "  prioridade: \(.priority)" else "" end)\ninício: \(.start|todate)  fim: \(.end|todate)\nproblemas: \((.problems//[])|map("\(.letter)·\(.name)")|join("  "))\(if .languages then "\nlinguagens: \(.languages|join(" "))" else "" end)"'; }
+    "id: \(.id)\nnome: \(.name)\nmodo: \(.mode)\(if .priority then "  prioridade: \(.priority)" else "" end)\ninício: \(.start|todate)  fim: \(.end|todate)\nproblemas: \((.problems//[])|map("\(.letter)·\(.name)")|join("  "))\(if .languages then "\nlinguagens: \(.languages|join(" "))" else "" end)\nmódulos: \((.modules // {}) | to_entries | map(select(.value == true or ((.value|type) == "object" and .value.on != false)) | .key) | if length > 0 then join(", ") else "nenhum (prova comum)" end)"'; }
 cmd_export(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest export <cid> [arquivo] [--full]"
   local cid="$1" outf="" full="" a; shift || true
   for a in "$@"; do case "$a" in --full) full='&full_statements=1';; *) outf="$a";; esac; done
@@ -230,6 +245,16 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
       done
       api POST "/contest/admin/settings$(qc)" "$body" | out '"salvo: \(.changed|join(", "))"';;
     *) die "settings: use 'get' ou 'set k=v …'";;
+  esac; }
+# ---- módulos do contest (Central › Módulos) --------------------------------------------------
+cmd_modules(){ need_contest; need_login; local sub="${1:-list}"; shift || true
+  case "$sub" in
+    list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao)"
+      local ids="$1"; [[ "$ids" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "ids separados por vírgula, sem espaço"
+      api POST "/contest/admin/modules$(qc)" "$(jq -cn --arg k "$sub" --arg v "$ids" '{($k): ($v|split(","))}')" \
+        | out '"módulos ligados: \(if (.enabled|length) > 0 then (.enabled|join(", ")) else "nenhum" end)"';;
+    *) die "modules: use 'list', 'on <ids>' ou 'off <ids>'";;
   esac; }
 cmd_extend(){ need_contest; need_login
   # extend <+min|epoch> [--group <regex> [--reason <txt>]]
@@ -818,6 +843,7 @@ case "$cmd" in
   export) cmd_export "$@";; duplicate|dup) cmd_duplicate "$@";; template|tpl) cmd_template "$@";;
   remove) cmd_remove "$@";;
   settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
+  modules|modulos|mod) cmd_modules "$@";;
   problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";;
   sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
   report) cmd_report "$@";;
