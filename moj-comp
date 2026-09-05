@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
-# moj-comp — CLI do COMPETIDOR do MOJ (camada 'comp'; `moj comp …` delega aqui).
-# Enviar soluções, acompanhar veredictos, placar e clarifications — e o modo EMERGENCIAL:
-# caiu a Internet, a CLI empacota a submissão CIFRADA com a hora UTC corrente e reenvia
-# quando a rede volta; a submissão conta NO HORÁRIO em que você a criou (penalidade justa).
+# moj-comp — CLI do competidor do MOJ (camada 'comp'; `moj comp …` delega aqui).
+# Envie soluções, acompanhe veredictos, veja o placar e faça perguntas. Se a Internet cair, a CLI
+# empacota a submissão com a hora UTC corrente e reenvia quando a rede voltar. A submissão conta
+# no horário em que você a criou.
 #
-#   moj-comp login <cid|url> [-u login]   (credenciais entregues pela organização)
-#   moj-comp logout | whoami | time       (time = seu relógio × o do servidor)
-#   moj-comp fetch                        (baixa TODOS os enunciados p/ ./<cid>-prova/ — RODE NO COMEÇO)
-#   moj-comp problems                     moj-comp score
-#   moj-comp submit <letra> <arquivo>     (envia e espera o veredicto; sem rede -> empacota sozinho)
-#   moj-comp subs                         (suas submissões e veredictos)
-#   moj-comp clar ls | ask <letra|geral> <pergunta>
-#   moj-comp news
-#   moj-comp outbox | sync                (fila offline | reenviar agora)
-#   moj-comp monitor                      (DEIXE RODANDO na queda: mostra a fila, reenvia
-#                                          sozinho e acompanha os veredictos quando voltar)
-#   moj-comp version | update | doctor
-# TREINO LIVRE (mesma CLI, subconjunto): moj-comp login treino (sua conta do site);
+#   moj-comp login <cid|url> [-u login]   Entra no contest com as credenciais da organização.
+#   moj-comp logout | whoami              Sai. Mostra quem você é.
+#   moj-comp time                         Compara o seu relógio com o do servidor.
+#   moj-comp fetch                        Baixa todos os enunciados para ./<cid>-prova/. Rode no começo.
+#   moj-comp problems                     Lista os problemas.
+#   moj-comp score                        Mostra o placar.
+#   moj-comp submit <letra> <arquivo>     Envia e espera o veredicto. Sem rede, empacota sozinho.
+#   moj-comp subs                         Lista as suas submissões e veredictos.
+#   moj-comp clar ls | ask <letra|geral> <pergunta>   Lista e faz perguntas.
+#   moj-comp news                         Mostra os avisos da organização.
+#   moj-comp outbox | sync                Mostra a fila offline. Reenvia agora.
+#   moj-comp monitor                      Deixe rodando na queda de rede. Mostra a fila, reenvia
+#                                         sozinho e acompanha os veredictos quando a rede voltar.
+#   moj-comp version | update | doctor    Compara o build. Atualiza. Diagnostica o ambiente.
+# Treino livre (a mesma CLI, sem o modo offline): moj-comp login treino (conta do site);
 #   problems <busca> · statement <org#slug> · submit <org#slug> <arquivo> · subs
-# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_CONTEST (= -c). Requisitos:
-# bash, curl, jq, openssl. Sem root, sem instalação: um arquivo.
-# PROVA COM GATE DE NAVEGADOR: rode a CLI na máquina de prova — ela manda o mesmo User-Agent
-# do navegador da imagem (lido de /etc/moj/user-agent; MOJ_UA_FILE/MOJ_USER_AGENT mudam),
-# marcado como "moj-comp/<build>" (a organização vê o que veio da CLI e o que veio da web).
+# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_CONTEST (= -c).
+# Requisitos: bash, curl, jq, openssl. Sem root. Sem instalação. Um arquivo só.
+# Prova com gate de navegador: rode a CLI na máquina de prova. Ela manda o User-Agent do
+# navegador da imagem (lido de /etc/moj/user-agent; MOJ_UA_FILE e MOJ_USER_AGENT mudam) com a
+# marca "moj-comp/<build>". A organização vê o que veio da CLI e o que veio da web.
 # @INLINE-BEGIN lib/core.sh  (mkdist.sh troca este bloco pelo conteúdo da lib -> 1 arquivo)
 _moj_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 _MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"

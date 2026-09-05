@@ -1,42 +1,46 @@
 #!/usr/bin/env bash
-# moj-contest — CLI de GESTÃO DE CONTEST do MOJ (camada 'contest'; `moj contest …` delega aqui).
-# Tudo pela API — os mesmos bloqueios da web valem (o corte é no servidor).
+# moj-contest — CLI de gestão de contest do MOJ (camada 'contest'; `moj contest …` delega aqui).
+# Tudo pela API. Os mesmos bloqueios da web valem. O servidor aplica o corte.
 #
-# SESSÕES: os comandos de criação/templates/export/duplicate/list/remove usam a sessão do
-# TREINO (`moj login`). Os comandos de ADMINISTRAÇÃO (settings/problems/users/…) exigem sessão
-# NAQUELE contest: `moj-contest login <cid>` com uma conta *.admin do contest (token por
-# contest em ~/.config/moj/token-<cid> — não atropela sua sessão de autoria).
+# Sessões: há duas. Os comandos create, template, export, duplicate, list e remove usam a sessão
+# do treino (`moj login`). Os comandos de administração (settings, problems, users e os demais
+# com -c) exigem uma sessão naquele contest: `moj-contest login <cid>` com uma conta *.admin do
+# contest. O token fica em ~/.config/moj/token-<cid>. Ele não substitui a sessão do treino.
 #
-#   moj-contest login <cid> [-u login]   moj-contest logout [<cid>]   moj-contest whoami
-#   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E] [--empty]
-#                      [--modules a,b,c]
-#     (a criação exige ao menos UM problema; `--empty` cria a sala vazia — os problemas entram
-#      depois com `-c <cid> problems add`. O contest entra no ar na hora, em qualquer caso.
-#      `--modules` liga módulos na criação; no spec, a seção `modules{}` leva também os DADOS de
-#      cada módulo — sedes, balões, coortes, gate de UA, rodadas, documentos, inscrições, telão,
-#      classificação. Veja `moj-contest modules`.)
-#   moj-contest list                     (contests criados por você)
-#   moj-contest show <cid>               moj-contest export <cid> [arquivo] [--full]
-#   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]
-#   moj-contest template list | show <nome> | save <nome> (--from-contest <cid> [--with-problems] | --from-file f.json) | rm <nome> | rename <nome> <novo>
-# Administração (exigem -c <cid> ou MOJ_CONTEST, e sessão .admin do contest):
-#   moj-contest -c <cid> settings [get]        moj-contest -c <cid> settings set k=v [k=v…]
-#     (penalidade ICPC: settings set penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce;
-#      penalty_verdicts= [vazio] = nenhum verdict penaliza;
-#      pool de juízes: settings set judges=cpu1,cpu2 — vazio [judges=] = qualquer juiz;
-#      correção manual: settings set manual_verdict=true review_judges=2 [1..5 juízes validam])
+#   moj-contest login <cid> [-u login]   Entra no contest.
+#   moj-contest logout [<cid>] | whoami  Sai. Mostra quem você é.
+#   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E]
+#                      [--empty] [--modules a,b,c]
+#       Cria o contest. Exige ao menos um problema. --empty cria a sala vazia; os problemas entram
+#       depois com `-c <cid> problems add`. O contest entra no ar na hora. --modules liga módulos.
+#       No spec, a seção modules{} leva os dados de cada módulo: sedes, balões, coortes, gate de
+#       UA, rodadas, documentos, inscrições, telão e classificação. Veja `moj-contest modules`.
+#   moj-contest list                     Lista os contests criados por você.
+#   moj-contest show <cid>               Mostra o resumo de um contest, com os módulos ligados.
+#   moj-contest export <cid> [arquivo] [--full]   Grava o spec em um arquivo. Sem credenciais.
+#   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]   Copia um contest.
+#   moj-contest template list | show <nome> | save <nome> (--from-contest <cid> [--with-problems]
+#                      | --from-file f.json) | rm <nome> | rename <nome> <novo>   Gerencia templates.
+# Administração (exigem -c <cid> ou MOJ_CONTEST, e a sessão .admin do contest):
 #   moj-contest -c <cid> modules [list] | on <id[,id…]> | off <id[,id…]>
-#     (MÓDULOS = grupos de recursos que o contest liga: sedes, maquinas, rodadas, documentos,
-#      baloes, coortes, inscricoes, telao, classificacao. `list` mostra ligado/dados presentes.
-#      Desligar nunca apaga dado. Prova de disciplina: nenhum; com Maratona Linux: maquinas.)
-#   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]
+#       Gerencia os módulos: sedes, maquinas, rodadas, documentos, baloes, coortes, inscricoes,
+#       telao, classificacao. list mostra ligado/desligado e se há dados. Desligar não apaga dado.
+#       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos.
+#   moj-contest -c <cid> settings [get]  Mostra as configurações.
+#   moj-contest -c <cid> settings set k=v [k=v…]   Grava configurações.
+#       Penalidade ICPC: penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce.
+#       penalty_verdicts= (vazio) = nenhum veredicto penaliza.
+#       Pool de juízes: judges=cpu1,cpu2. judges= (vazio) = qualquer juiz.
+#       Correção manual: manual_verdict=true review_judges=2 (1 a 5 juízes validam).
+#   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]   Prorroga o fim.
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
-#                       | judges <letra> <host1,host2|-> ('-' herda o pool do contest)
+#                       | judges <letra> <host1,host2|->   ('-' volta a herdar do contest)
 #                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
 #                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
 #   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
-#                       | rm <login> | disable <login> | logout <login> | set-password-all <senha> [--include-disabled]
+#                       | rm <login> | disable <login> | logout <login>
+#                       | set-password-all <senha> [--include-disabled]
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
@@ -45,40 +49,39 @@
 #                       | problems <slug> [ls|set <id,id…>|add <id>|rm <letra>]
 #                       | promote [--force] | publish <slug> | unpublish <slug> | rm <slug>
 #                       | archive <slug> [arq.tar.gz]
-#     (AQUECIMENTO e prova oficial no MESMO contest: mesma URL, mesmo login, config intacta.
-#      Promover ARQUIVA a rodada no ar — submissões, veredictos, placar e logs ficam guardados
-#      para auditoria — e coloca a janela + os problemas da próxima no ar. Recusa se houver job
-#      em voo, veredicto pendente ou review aberto; `rounds ls` mostra os bloqueadores.)
+#       Aquecimento e prova oficial no mesmo contest: mesma URL, mesmo login, config intacta.
+#       Promover arquiva a rodada no ar (submissões, veredictos, placar e logs ficam guardados) e
+#       coloca a próxima no ar. Recusa com job em voo, veredicto pendente ou review aberto.
+#       `rounds ls` mostra os bloqueadores.
 #   moj-contest -c <cid> cohorts ls | add <id> [--name N] [--regex R] [--private] [--unranked]
 #                       [--sees a,b] [--default] | set <id> … | rm <id>
 #                       | assign <login> <coorte> | materialize | release [on|off]
-#     (COORTES de placar: times oficiais × CONVIDADOS. Coorte privada não aparece no placar
-#      público e os times regulares não a veem; os convidados veem todos. `--unranked` = entra
-#      intercalado sem consumir posição oficial. `release` é o "liberamos tudo".)
+#       Coortes de placar: times oficiais e convidados. Uma coorte privada não aparece no placar
+#       público. --unranked entra intercalado sem consumir posição. release libera os resultados.
 #   moj-contest -c <cid> ua-gate show | check <login>
 #                       | set [--mode enforce|off] [--from-login REGEX --expect '\1']
 #                         [--region 'Sede=substring']… [--regex 'REGEX=substring']…
 #                         [--exempt REGEX]… [--fallback S]
-#     (GATE DE NAVEGADOR POR SEDE: a imagem de cada sede manda um UA com um pedaço do login do
-#      time — teambrspso001 -> "brspso". `--from-login` cobre todas as sedes de uma vez;
-#      `--region` é o override de sede com imagem fora do padrão; `--exempt` é a margem.
-#      `check` diz o esperado de um time sem ele precisar logar.)
+#       Gate de navegador por sede. A imagem de cada sede manda um User-Agent com um trecho do login
+#       do time (teambrspso001 -> "brspso"). --from-login cobre todas as sedes de uma vez. --region é
+#       o override de uma sede. --exempt é a isenção. check diz o trecho esperado de um time.
 #   moj-contest -c <cid> seed [--teams N] [--subs N] [--seed S] [--freeze-minute M] [--live N]
-#     (só em contest DEMO=1: povoa placar/veredictos sintéticos p/ quem desenvolve telão)
+#       Povoa um contest DEMO=1 com placar e veredictos sintéticos. Serve para quem desenvolve telão.
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
-#     (time × IP × User-Agent da rodada — é no aquecimento que os times ligam as máquinas)
+#       Mostra time × IP × User-Agent da rodada. No aquecimento os times ligam as máquinas.
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|es|both|all]
 #                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
-#                       | upload <tipo> <doc.pdf> [--lang pt]  (PDF PRONTO: vence o gerado; --rm volta)
+#                       | upload <tipo> <doc.pdf> [--lang pt]   (PDF pronto vence o gerado; --rm volta)
 #                       | set caderno_version=v1.2 [errata=…] [cover_note=…]
 #                       | text <info|capa> [--lang pt] [--show | --from arq|- | --reset]
-#     (documentos da prova: info sheet, caderno e folha de time limits, em PDF+HTML e pt/en.
-#      `ls`/`get` funcionam com QUALQUER conta do contest — a sede baixa o que foi publicado;
-#      gerar/publicar/capa exigem .admin ou .cjudge. O caderno não publicado é 404 p/ os demais.)
-#   moj-contest remove <cid>             (tira do ar; exige .admin do TREINO)
-# Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host p/ dev). Saída crua: --json.
+#       Documentos da prova: info sheet, caderno e folha de time limits, em PDF e HTML, pt/en/es.
+#       ls e get funcionam com qualquer conta do contest e mostram só o publicado.
+#       gen, publish e cover exigem .admin ou .cjudge.
+#   moj-contest remove <cid>             Tira o contest do ar. Exige .admin do treino.
+# Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host em dev). Saída crua: --json.
+# Documentação: README.md (PT) e README.en.md (EN).
 set -euo pipefail
 
 MOJ_TOOL=moj-contest

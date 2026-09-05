@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# moj-judges — CLI de GERÊNCIA FINA DOS JUÍZES do MOJ (camada 'judges'; `moj judges …` delega aqui).
-# Tudo pela API com sessão .admin do TREINO (`moj login`); o corte é no servidor.
+# moj-judges — CLI de gerência dos juízes do MOJ (camada 'judges'; `moj judges …` delega aqui).
+# Tudo pela API, com a sessão .admin do treino (`moj login`). O servidor aplica o corte.
 #
-#   moj-judges ls                        saúde: host, slots ocupados/total, partição, cache, TLs
-#   moj-judges show <host>               detalhe: specs, config, jobs correntes, calibrações na fila
+#   moj-judges ls                        Mostra a saúde: host, slots ocupados/total, partição, cache, TLs.
+#   moj-judges show <host>               Mostra o detalhe: specs, config, jobs correntes, calibrações na fila.
 #   moj-judges config <host> [--partition off|numa|cpus:<X>] [--reserve N] [--disable|--enable]
-#       particiona a máquina em SLOTS (corrige N problemas ao mesmo tempo, cada job pinado
-#       no seu conjunto de cpus); sem flags, mostra a config vigente. O agente DRENA os jobs
-#       em andamento e aplica (acompanhe com 'ls').
-#   moj-judges results [host] [-n N]     últimas correções por juiz (veredicto, tempo, quem/qual)
-#   moj-judges clearcache <host>         limpa o cache do juiz (re-baixa e recalibra sob demanda)
-#   moj-judges calibrate <id> [--hosts h1,h2]   calibração (direcionada com --hosts); pedido
-#       repetido NÃO duplica (o servidor devolve already_queued com o reqid existente)
-#   moj-judges reset <host>              RECUPERAÇÃO: SIGKILL nos jobs em andamento do juiz
-#       (grupo de processos inteiro), reporta judge-error/calib-fail e reconcilia a config —
-#       chega MESMO com o juiz ocupado/travado (sem SSH)
-#   moj-judges restart <host>            reset + o agente se RE-EXECUTA (relê config; o servidor
-#       re-enfileira o que estava atribuído — nenhum item de fila se perde)
-#   moj-judges cancel <id> [--inprogress]   remove calibrações do problema da FILA (pendentes +
-#       direcionadas não entregues); as EM EXECUÇÃO só com --inprogress (prefira 'reset')
-#   moj-judges queue                     fila de submissões + calibrações pendentes
-#   moj-judges status                    resumo público (juízes online, slots, fila, daemons)
+#                                        Particiona a máquina em slots. Cada slot corrige um problema,
+#                                        pinado no seu conjunto de cpus. Sem flags, mostra a config.
+#                                        O agente drena os jobs em andamento e aplica. Acompanhe com 'ls'.
+#   moj-judges results [host] [-n N]     Lista as últimas correções por juiz: veredicto, tempo, quem, qual.
+#   moj-judges clearcache <host>         Limpa o cache do juiz. Ele baixa e recalibra sob demanda.
+#   moj-judges calibrate <id> [--hosts h1,h2]   Calibra. Com --hosts, só nesses juízes.
+#                                        Pedido repetido não duplica: o servidor devolve already_queued.
+#   moj-judges reset <host>              Recupera o juiz: SIGKILL nos jobs em andamento, reporta
+#                                        judge-error/calib-fail e reconcilia a config. Funciona com o
+#                                        juiz travado. Sem SSH.
+#   moj-judges restart <host>            Faz o reset e re-executa o agente. O servidor re-enfileira
+#                                        o que estava atribuído. Nenhum item da fila se perde.
+#   moj-judges cancel <id> [--inprogress]   Remove calibrações do problema da fila. Com --inprogress,
+#                                        remove também as em execução. Prefira 'reset'.
+#   moj-judges queue                     Mostra a fila de submissões e calibrações.
+#   moj-judges status                    Mostra o resumo público: juízes online, slots, fila, daemons.
 #
-# Config: MOJ_URL, MOJ_HOST (header Host p/ dev). Saída crua: --json (antes do subcomando).
+# Config: MOJ_URL, MOJ_HOST (header Host em dev). Saída crua: --json antes do subcomando.
 set -euo pipefail
 
 MOJ_TOOL=moj-judges

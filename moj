@@ -1,52 +1,66 @@
 #!/usr/bin/env bash
-# moj — CLI de autoria de problemas do MOJ. SEM git, SEM chave: só o seu LOGIN do MOJ.
-# Dois jeitos de trabalhar:
-#   • EDITOR INTERATIVO (como os campos da página):   moj edit <id|pasta>
-#   • ARQUIVOS LOCAIS (edite com seu editor favorito): moj clone <id> ; … ; moj push
+# moj — CLI de autoria de problemas do MOJ. Você não precisa de git nem de chave SSH. Você precisa
+# só do seu login do MOJ. Há dois jeitos de trabalhar:
+#   • Editor interativo (os campos da página):     moj edit <id|pasta>
+#   • Arquivos locais (edite com o seu editor):    moj clone <id> ; edite ; moj push
 #
-#   moj login | whoami | logout
-# Conceitos: ORG = quem edita + prefixo do id <org>#<prob> (acesso, 1 por problema);
-#            COLEÇÃO = rótulo de agrupamento (tag, VÁRIAS por problema, pode ter espaços).
-#   moj ls [mine|shared|public]   moj repos   moj mkdir <org>   (mkdir = criar org)
-#   moj board                     (painel: seus problemas + o que precisa revisar)
-#   moj status [<id>] | check <id>  (sem id: saúde do sistema; com id: QA do problema —
-#                                    validação, time-limits por juiz, solução good sem TL)
-#   moj new <org> <prob>          moj clone <id> [dir]            moj info <id>
-#   moj edit <id|dir>             moj push [dir] [--force]        (push/clone levam scripts/ e tests/score)
-#   moj test [dir] [--run [sol]]  (--run JULGA local via mojtools; exige Linux+bwrap real;
-#                                  com tests/score confere os GRUPOS localmente)
-#   moj doctor | version | update (diagnóstico do ambiente · build local×servidor · auto-atualiza)
-#   moj checker <dir> <checker.cpp>          (checker testlib normalizado — mojtools local)
-#   moj interactive <dir> <arbitro> [--score] (problema interativo — mojtools local)
-#   moj fn <dir> [--langs c,cpp,py,java,rs]  (drivers de SUBMISSÃO DE FUNÇÃO — mojtools local)
-#   moj languages <dir> [c,cpp,py,…|all]  (whitelist de linguagens de SUBMISSÃO; obrigatória
-#                                          em problema de função/ban — sem ela, trocar de linguagem burla o driver)
-#   moj preview [dir]             moj download <id> [arquivo] [--sha <sha>]   moj upload <id> [dir|arquivo] [--force]
-#   moj log <id> [-n N] | moj log <id> <sha>   (histórico git do problema; com <sha> mostra o diff -p)
-#   moj restore <id> <sha>        (restaura versão antiga como um commit NOVO; meta/público preservados)
-#   moj validate <id>             (valida E (RE)ENFILEIRA calibração; NÃO publica — pode ser privado.
-#                                  Só CONSULTAR o estado = moj status/check, que são read-only)
-#   moj public <id> on|off [--yes]   moj publish <id>  (público => o servidor VALIDA + CALIBRA)
+# Conceitos: ORG = quem edita. É o prefixo do id <org>#<prob>. Um problema tem uma org.
+#            COLEÇÃO = rótulo de agrupamento. Um problema pode ter várias. O nome pode ter espaços.
+#
+# Sessão
+#   moj login | whoami | logout           Entra, mostra quem você é, sai.
+# Listas e painel
+#   moj ls [mine|shared|public]           Lista problemas.
+#   moj repos                             Lista orgs.
+#   moj board                             Mostra o painel dos seus problemas e o que revisar.
+#   moj status [<id>] | check <id>        Sem id: saúde do sistema. Com id: QA do problema
+#                                         (validação, TL por juiz, solução good sem TL).
+# Pacote
+#   moj new <org> <prob>                  Cria o esqueleto do pacote em ./<prob>.
+#   moj clone <id> [dir]                  Baixa o pacote inteiro.
+#   moj info <id>                         Mostra tudo do problema.
+#   moj edit <id|dir>                     Abre o editor interativo.
+#   moj push [dir] [--force]              Envia o pacote. Leva scripts/ e tests/score.
+#   moj test [dir] [--run [sol]]          Faz o pré-voo local. --run julga com o mojtools
+#                                         (exige Linux com bwrap real). Confere os grupos de tests/score.
+#   moj preview [dir]                     Renderiza o enunciado em HTML.
+#   moj download <id> [arq] [--sha <sha>] Baixa o pacote. --sha baixa a versão do commit.
+#   moj upload <id> [dir|arq] [--force]   Sobe o pacote inteiro.
+#   moj languages <dir> [c,cpp,py,…|all]  Define as linguagens de submissão. Obrigatória em
+#                                         problema de função ou de ban.
+# Correção especial (exigem o mojtools local)
+#   moj checker <dir> <checker.cpp>       Instala um checker testlib.
+#   moj interactive <dir> <arbitro> [--score]   Instala o driver de problema interativo.
+#   moj fn <dir> [--langs c,cpp,py,java,rs]     Instala os drivers de submissão de função.
+# Histórico
+#   moj log <id> [-n N] | moj log <id> <sha>    Mostra o histórico git. Com <sha>, mostra o diff.
+#   moj restore <id> <sha>                Restaura a versão como um commit novo.
+# Portão de qualidade
+#   moj validate <id> [--no-wait]         Valida e enfileira a calibração. Não publica.
+#                                         Atenção: cada chamada recalibra. Para consultar, use status/check.
+#   moj public <id> on|off [--yes]        Publica ou despublica.
+#   moj publish <id>                      Publica. O servidor valida e calibra.
 #   moj calibrate <id> [--hosts h1,h2|--all-judges|--per-cpu] | --judges | --all-stale
-#                                 (direcionada = calibra nos juízes citados/todos online/1 por CPU,
-#                                  como na web; --judges lista o parque; --all-stale = o lote do painel)
-#   moj calib <id>                (a calibração POR EXTENSO: cada juiz, solução a solução, teste a
-#                                  teste {name,code,time,tl} — `--json` p/ ferramentas externas)
-#   moj calib-report <id> [--host <j> --sol <s>] [-o f.html]  (report.html de uma solução; sem
-#                                  host/sol LISTA os disponíveis)
-#   moj testrun <id|dir> <sol> [--report f.html]  (roda UMA solução avulsa NO JUIZ — jaula e TL
-#                                  reais, fora do history; exige permissão de EDIÇÃO no problema)
-#   moj testrun-status <run>      (consulta um testrun já enfileirado)
-#   (--json antes do subcomando = saída crua em ls/board/status/check/calib/testrun*)
-#   moj share <org> <login>       moj unshare <org> <login>   (membro da org = quem edita)
-#   moj org list|create|members|public|rm   (orgs: quem edita + trava de público; rm só org vazia)
-#   moj collection ls|create|show|add|remove|rename|delete|status  (coleções = tags de agrupamento, m:n;
-#                                  rename/delete acompanham o re-tag até o fim — --no-wait solta)
-#   moj mv <id> <org>             (move um RASCUNHO p/ outra org — muda o id p/ <org>#<prob>)
-#   moj rm <id>                   (remove o problema; pede confirmação repetindo o id)
-#   moj contest …                 (GESTÃO DE CONTEST — delega ao moj-contest; `moj contest help`)
-# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host p/ teste local),
-#         EDITOR (editor de texto; default nano/vi).
+#                                         Calibra nos juízes escolhidos. --judges lista o parque.
+#                                         --all-stale recalibra o lote do painel.
+#   moj calib <id>                        Mostra a calibração por extenso (--json = JSON cru).
+#   moj calib-report <id> [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
+#   moj testrun <id|dir> <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
+#   moj testrun-status <run>              Consulta um testrun.
+# Orgs e coleções
+#   moj mkdir <org>                       Cria uma org.
+#   moj share <org> <login> | unshare <org> <login>   Adiciona ou remove um membro.
+#   moj org list|create|members|public|rm Gerencia orgs. rm remove só org vazia.
+#   moj collection ls|create|show|add|remove|rename|delete|status   Gerencia coleções.
+#   moj mv <id> <org>                     Move um rascunho para outra org. O id muda.
+#   moj rm <id>                           Remove o problema. Pede o id para confirmar.
+# Manutenção
+#   moj doctor | version | update         Diagnostica, compara o build, atualiza a CLI.
+#   moj contest …                         Delega ao moj-contest. Veja `moj contest help`.
+# Saída crua: --json antes do subcomando (ls, board, status, check, calib, testrun*).
+# Config: MOJ_URL (default https://moj.naquadah.com.br), MOJ_HOST (header Host em teste local),
+#         EDITOR (editor de texto; default nano ou vi).
+# Documentação: README.md (PT) e README.en.md (EN).
 set -euo pipefail
 
 MOJ_TOOL=moj

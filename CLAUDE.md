@@ -82,3 +82,14 @@ Workspace multi-repo: ver `../CLAUDE.md`.
 - Rodapé de commit: **só** `Co-Authored-By:`, **nunca** uma linha `Claude-Session:` (ruído no histórico).
 - **Doc junto com o código** (doc atrasada = bug): mudou subcomando/contrato? atualize o `README.md`, o
   cabeçalho de `moj` e `cdmoj/docs/API.md` (+ `openapi.json`) no mesmo commit.
+- **Documentação em STE (Simplified Technical English), nos DOIS idiomas** (pedido do Ribas,
+  2026-09-05): `README.md` (PT), `README.en.md` (EN, mesmo conteúdo e ordem), o cabeçalho de ajuda
+  dos quatro executáveis e os quatro tutoriais web que citam CLI (`cdmoj/web/problemas/tutorial.html`,
+  `web/treino/criar/tutorial.html`, `web/contest/cli.html`, `web/treino/cli.html`) seguem estas
+  regras: **uma instrução por frase**; frases de até ~20 palavras; **voz ativa e imperativo** em
+  procedimento ("Rode…"/"Run…"); presente; **um termo por conceito** (glossário no fim do README:
+  contest, problema/problem, pacote/package, veredicto/verdict, sede/site, módulo/module,
+  rodada/round, token, juiz/judge, placar/scoreboard — nunca sinônimos alternados); sem gíria, sem
+  metáfora, sem parênteses encadeados, sem "etc."; passos em lista numerada; aviso como frase
+  própria ("Atenção: …"/"Warning: …"); termo de comando em `código`. Comando novo nasce assim nos
+  quatro lugares (README PT+EN, cabeçalho, tutorial) — a regra `cli-muda-tutorial-acompanha` vale.
