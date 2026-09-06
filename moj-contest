@@ -26,6 +26,8 @@
 #       Gerencia os módulos: sedes, maquinas, rodadas, documentos, baloes, coortes, inscricoes,
 #       telao, classificacao. list mostra ligado/desligado e se há dados. Desligar não apaga dado.
 #       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos.
+#       Gravar o dado de um módulo (rounds add, cohorts add, ua-gate set, docs gen…) liga o
+#       módulo sozinho. Só desligar é manual.
 #   moj-contest -c <cid> settings [get]  Mostra as configurações.
 #   moj-contest -c <cid> settings set k=v [k=v…]   Grava configurações.
 #       Penalidade ICPC: penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce.

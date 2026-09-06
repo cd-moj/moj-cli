@@ -263,6 +263,10 @@ A module is a group of contest features. A course exam turns on none. A lab exam
 turns on `maquinas`. The Maratona turns on all. Turning a module off hides its panels in the admin. It
 never deletes data.
 
+You do not need to turn a module on before you use the feature. A command that writes the module data
+turns the module on by itself: `rounds add` turns on `rodadas`, `cohorts add` turns on `coortes`,
+`ua-gate set` turns on `maquinas`, `docs gen` turns on `documentos`. Only turning off is manual.
+
 The JSON spec of `create` carries the `modules{}` section. Each key is a module. The value is `true`
 or an object with the module data. A present object turns the module on, except with `on: false`.
 

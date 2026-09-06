@@ -264,6 +264,10 @@ Um módulo é um grupo de recursos do contest. Uma prova de disciplina não liga
 em laboratório com Maratona Linux liga `maquinas`. A Maratona liga todos. Desligar um módulo
 esconde os painéis dele no admin. Nunca apaga dado.
 
+Você não precisa ligar um módulo antes de usar o recurso. Um comando que grava o dado do módulo
+liga o módulo sozinho: `rounds add` liga `rodadas`, `cohorts add` liga `coortes`, `ua-gate set`
+liga `maquinas`, `docs gen` liga `documentos`. Só desligar é manual.
+
 O spec JSON do `create` leva a seção `modules{}`. Cada chave é um módulo. O valor é `true` ou um
 objeto com os dados do módulo. Um objeto presente liga o módulo, exceto com `on: false`.
 
