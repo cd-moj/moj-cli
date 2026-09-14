@@ -49,12 +49,15 @@
 #                       [--freeze <…>] [--kind warmup|official|extra]
 #                       | set <slug> [--slug <novo>] [--name N] [--start …] [--end …] [--freeze …] [--kind …]
 #                       | problems <slug> [ls|set <id,id…>|add <id>|rm <letra>]
+#                       | colors <slug> [ls|set <json>|set A=RRGGBB,B=RRGGBB[,sonic]|clear]
 #                       | promote [--force] | publish <slug> | unpublish <slug> | rm <slug>
 #                       | archive <slug> [arq.tar.gz]
 #       Aquecimento e prova oficial no mesmo contest: mesma URL, mesmo login, config intacta.
 #       Promover arquiva a rodada no ar (submissões, veredictos, placar e logs ficam guardados) e
 #       coloca a próxima no ar. Recusa com job em voo, veredicto pendente ou review aberto.
-#       `rounds ls` mostra os bloqueadores.
+#       `rounds ls` mostra os bloqueadores. `rounds problems` aceita todo problema que o dono do
+#       contest pode ver: público, seu, de colaborador ou da org. `rounds colors` define as cores
+#       de balão da rodada. Uma rodada sem cores herda as cores em vigor quando é promovida.
 #   moj-contest -c <cid> cohorts ls | add <id> [--name N] [--regex R] [--private] [--unranked]
 #                       [--sees a,b] [--default] | set <id> … | rm <id>
 #                       | assign <login> <coorte> | materialize | release [on|off]
@@ -625,6 +628,26 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       jq -cn --arg s "$slug" --argjson p "$cur" '{action:"problems",slug:$s,problems:$p}' > "$tmp"
       api_post_file "/contest/admin/rounds$(qc)" "$tmp" | out '"ok: \(.n) problema(s) na rodada '"$slug"'"'
       rm -f "$tmp";;
+    colors)
+      # cores de balão DA RODADA (formato do balloons.json). A rodada no ar grava na hora; a
+      # planejada guarda e aplica na promoção. clear = a rodada volta a herdar as cores em vigor.
+      [[ $# -ge 1 ]] || die "uso: rounds colors <slug> [ls] | <slug> set '{\"A\":\"RRGGBB\",…}' | <slug> set A=RRGGBB,B=RRGGBB[,sonic] | <slug> clear"
+      local slug="$1" op="${2:-ls}" cl; shift || true; shift || true
+      case "$op" in
+        ls) api GET "/contest/admin/rounds$(qc)" | jq -r --arg s "$slug" '(.rounds[]?|select(.slug==$s)) as $r
+              | if $r == null then "rodada não encontrada" elif ($r.colors // {}) == {} then "(sem cores próprias: herda as cores em vigor)"
+                else ($r.colors | to_entries[] | "\(.key)\t\(.value)") end'; return 0;;
+        set) [[ $# -ge 1 ]] || die "uso: rounds colors <slug> set <json | A=RRGGBB,B=RRGGBB[,sonic]>"
+             if [[ "$1" == \{* ]]; then cl="$1"
+             else cl="$(jq -cn --arg v "$1" '[$v | split(",")[] | select(length>0)]
+                    | map(if . == "sonic" then {key:"enableSonic", value:true}
+                          else (split("=") | {key:.[0], value:(.[1] // "")}) end) | from_entries')"; fi
+             jq -e 'type=="object" and length>0' >/dev/null 2>&1 <<<"$cl" || die "cores inválidas: use JSON ou A=RRGGBB,B=RRGGBB";;
+        clear) cl=null;;
+        *) die "rounds colors: use ls|set|clear";;
+      esac
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg s "$slug" --argjson c "$cl" '{action:"set",slug:$s,colors:$c}')" \
+        | out '"ok: cores da rodada \(.round.slug): \((.round.colors // {}) | if . == {} then "herda as cores em vigor" else (to_entries | map("\(.key)=\(.value)") | join(" ")) end)"';;
     promote)
       local force=false a
       for a in "$@"; do [[ "$a" == --force ]] && force=true; done
