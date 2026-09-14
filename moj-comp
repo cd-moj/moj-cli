@@ -356,7 +356,7 @@ cmd_news(){ need_contest; _contest_only news; need_login
 cmd_clar(){ need_contest; _contest_only clar; need_login
   local sub="${1:-ls}"; shift || true
   case "$sub" in
-    ls) api GET "/contest/clarifications$(qc)" | jq -r '.clarifications[]? | "[\(.problem // "geral")] \(.question)\n  ↳ \(.answer // "(sem resposta ainda)")\n"';;
+    ls) api GET "/contest/clarifications$(qc)" | jq -r '.clarifications[]? | "[\(.problem // "geral")] \(if .broadcast == true then "📣 aviso oficial" + (if (.question // "") != "" then ": " + .question else "" end) else .question end)\n  ↳ \(.answer // "(sem resposta ainda)")\n"';;
     ask) local prob="${1:-}"; shift || true; local q="$*"
          [[ -n "$prob" && -n "$q" ]] || die "uso: $MOJ_TOOL clar ask <letra|geral> <pergunta>"
          [[ "$prob" == geral ]] && prob=general
