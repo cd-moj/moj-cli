@@ -24,6 +24,15 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   única: `cdmoj/docs/PACOTE.md`** (inclusive o `.moj-id`, que é ESTE repo quem escreve e que **não**
   sobe ao servidor). **Título = campo** (`.moj-id` `.title` → `display_title`), **não** o `% Título`
   do texto (legado); por isso `push`/`upload` exigem título.
+- **Idiomas do enunciado (2026-09-15)**: `pkg_to_json` manda `translations{en,es}` (de
+  `docs/enunciado.<lang>.md`, `solucao.<lang>.md`, `notes/*.<lang>.md`; `_trans_nd`, conteúdo por
+  `--rawfile`) + `titles` do `.moj-id`; clone CIENTE (`trans_rt`) manda `null` p/ idioma sem arquivo
+  (= apaga no servidor, como o `scripts_files`); `json_to_pkg` grava os arquivos e `titles`/`trans_rt`
+  no `.moj-id`. `moj preview --lang`, `moj title --lang`, `moj edit` opções `t`/`e`. O `moj-comp`
+  NUNCA adivinha idioma: pede só o que `statement_langs` (por problema, 4ª coluna do `problems.tsv`)
+  listou — `statement <letra>` baixa todos (`A.html`, `A.en.html`…), `--lang` um só, idioma não
+  oferecido = erro com a lista. Testes: `test/translations.sh` (funções via `MOJ_CLI_LIB_ONLY=1
+  source moj`) e `test/comp-statement.sh` (curl falso; roda no artefato `dist/moj-comp` se existir).
 - **Mexeu no formato do pacote?** Atualize o **`cdmoj/docs/PACOTE.md`** (fonte única) no mesmo commit;
   o `README.md` daqui só resume e aponta p/ ele — não redescreva o formato (a divergência de cópias
   já gerou o bug do título vazio).

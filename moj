@@ -23,11 +23,15 @@
 #   moj push [dir] [--force]              Envia o pacote. Leva scripts/ e tests/score.
 #   moj test [dir] [--run [sol]]          Faz o pré-voo local. --run julga com o mojtools
 #                                         (exige Linux com bwrap real). Confere os grupos de tests/score.
-#   moj preview [dir]                     Renderiza o enunciado em HTML.
+#   moj preview [dir] [--lang en|es]      Renderiza o enunciado em HTML. --lang renderiza a tradução.
+#   moj title [dir] [--lang en|es] [<t>]  Mostra ou define o título (o da tradução com --lang).
 #   moj download <id> [arq] [--sha <sha>] Baixa o pacote. --sha baixa a versão do commit.
 #   moj upload <id> [dir|arq] [--force]   Sobe o pacote inteiro.
 #   moj languages <dir> [c,cpp,py,…|all]  Define as linguagens de submissão. Obrigatória em
 #                                         problema de função ou de ban.
+# Idiomas do enunciado: docs/enunciado.md é o português. docs/enunciado.<lang>.md (en, es) é a
+#   tradução; docs/notes/<sample>.<lang>.md a explicação traduzida; docs/solucao.<lang>.md o
+#   editorial traduzido; o título traduzido fica em .moj-id `titles`. Tudo viaja no clone/push.
 # Correção especial (exigem o mojtools local)
 #   moj checker <dir> <checker.cpp>       Instala um checker testlib.
 #   moj interactive <dir> <arbitro> [--score]   Instala o driver de problema interativo.
@@ -140,10 +144,20 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   _docs_nd "$d" "$t/dfl"
   local dfflag=n
   { [[ -s "$t/dfl" ]] || [[ "$(jq -r '.docs_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && dfflag=y
+  # TRADUÇÕES (docs/enunciado.<lang>.md, docs/solucao.<lang>.md, docs/notes/<sample>.<lang>.md +
+  # titles do .moj-id) -> translations{<lang>:{title,enunciado_md,editorial_md?,notes?}}, NDJSON
+  # em arquivo, conteúdo por --rawfile. Clone CIENTE (trans_rt no .moj-id) manda o campo com TODOS
+  # os idiomas — `null` p/ o que não existe localmente (= apaga no servidor o que foi removido aqui,
+  # como o scripts_files); clone antigo (sem a flag e sem tradução local) não apaga a tradução de ninguém.
+  _trans_nd "$d" "$t/trans"
+  local trflag=n
+  { [[ -s "$t/trans" ]] || [[ "$(jq -r '.trans_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && trflag=y
   jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
+        --argjson titles "$([[ -f "$d/.moj-id" ]] && jq -c '.titles//{}' "$d/.moj-id" || echo '{}')" \
+        --slurpfile trs "$t/trans" --arg trflag "$trflag" \
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
         --argjson langs "$([[ -f "$d/.moj-id" ]] && jq -c '.languages//[]' "$d/.moj-id" || echo '[]')" \
         --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" --slurpfile scr "$t/scr" \
@@ -156,8 +170,28 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
      conf_text:$conf, examples:$exs, tests:$tss, sols:{good:$good,slow:$slow,wrong:$wrong,pass:$pass,upcoming:$up}}
     + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
     + (if $dfflag=="y" then {docs_files:$dfl} else {} end)
-    + (if $edflag=="y" then {editorial_md:$editorial} else {} end)'
+    + (if $edflag=="y" then {editorial_md:$editorial} else {} end)
+    + (if $trflag=="y" then {translations:(($trs|from_entries) as $t | {en:($t.en // null), es:($t.es // null)}), titles:$titles} else {} end)'
   rm -rf "$t"; }
+# _trans_nd <dir> <outfile> — NDJSON {key:<lang>, value:{title,enunciado_md,editorial_md?,notes?}}
+# por idioma (en, es) que tem enunciado, editorial OU nota traduzida. Conteúdo via --rawfile.
+STMT_LANGS_ALL="pt en es"
+_trans_nd(){ local d="$1" of="$2" l ef sf nf nm args filt ttl
+  : > "$of"; local tn; tn="$(mktemp)"
+  for l in $STMT_LANGS_ALL; do
+    [[ "$l" == pt ]] && continue
+    args=(); filt='{title:$ttl}'
+    ttl="$([[ -f "$d/.moj-id" ]] && jq -r --arg l "$l" '.titles[$l] // ""' "$d/.moj-id" 2>/dev/null || echo '')"
+    ef="$d/docs/enunciado.$l.md"; [[ -f "$ef" ]] && { args+=(--rawfile e "$ef"); filt+=' + {enunciado_md:$e}'; }
+    sf="$d/docs/solucao.$l.md"; [[ -f "$sf" ]] && { args+=(--rawfile s "$sf"); filt+=' + {editorial_md:($s|rtrimstr("\n"))}'; }
+    : > "$tn"; shopt -s nullglob
+    for nf in "$d/docs/notes"/*."$l".md; do nm="${nf##*/}"; nm="${nm%."$l".md}"
+      jq -nc --arg n "$nm" --rawfile v "$nf" '{key:$n, value:($v|rtrimstr("\n"))}' >> "$tn"; done
+    shopt -u nullglob
+    [[ -s "$tn" ]] && { args+=(--slurpfile nn "$tn"); filt+=' + {notes:($nn|from_entries)}'; }
+    (( ${#args[@]} )) || continue
+    jq -nc --arg l "$l" --arg ttl "$ttl" "${args[@]}" "{key:\$l, value:($filt)}" >> "$of"
+  done; rm -f "$tn"; }
 # _docs_nd <pkg> <outfile> — NDJSON {name, content_b64} das IMAGENS de docs/ (cap 2MB; maiores
 # são PULADAS com aviso — imagem de enunciado não precisa disso tudo)
 _docs_nd(){ local d="$1" of="$2" f b sz; : > "$of"; b="$(mktemp)"
@@ -226,6 +260,23 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
     done
     rm -f "$ntf"
   fi
+  # traduções (translations{<lang>}) -> docs/enunciado.<lang>.md, docs/solucao.<lang>.md,
+  # docs/notes/<sample>.<lang>.md (só idiomas da allowlist; conteúdo VERBATIM, como o PT)
+  jq --raw-output0 '(.translations // {}) | to_entries[] | select(.value != null and (.key|test("^(en|es)$")))
+      | .key, (.value.enunciado_md // ""), (.value.editorial_md // ""),
+        ((.value.notes // {}) | to_entries | map(select(.key|test("^[A-Za-z0-9_-]+$"))) | map("\(.key)\u0001\(.value)") | join("\u0002"))
+    ' < "$jf" > "$T/tr.nul" 2>/dev/null
+  local TL='' TE='' TD='' TN='' _tk _tv _pair
+  while IFS= read -r -d '' TL && IFS= read -r -d '' TE && IFS= read -r -d '' TD && IFS= read -r -d '' TN; do
+    if [[ -n "$TE" ]]; then printf '%s' "$TE" > "$d/docs/enunciado.$TL.md"; else rm -f "$d/docs/enunciado.$TL.md"; fi
+    if [[ -n "$TD" ]]; then printf '%s' "$TD" > "$d/docs/solucao.$TL.md"; else rm -f "$d/docs/solucao.$TL.md"; fi
+    rm -f "$d/docs/notes"/*."$TL".md 2>/dev/null
+    [[ -n "$TN" ]] && while IFS= read -r -d $'\x02' _pair || [[ -n "$_pair" ]]; do
+      _tk="${_pair%%$'\x01'*}"; _tv="${_pair#*$'\x01'}"
+      [[ -n "$_tk" && -n "$(tr -d '[:space:]' <<<"$_tv")" ]] || continue
+      mkdir -p "$d/docs/notes"; printf '%s' "$_tv" > "$d/docs/notes/$_tk.$TL.md"
+    done <<<"$TN"
+  done < "$T/tr.nul"
   # imagens de docs/ (docs_files) do servidor -> arquivos locais
   jq --raw-output0 '(.docs_files//[])[] | (.name // ""), (.content_b64 // "")' < "$jf" > "$T/df.nul" 2>/dev/null
   local dfn='' dfb=''
@@ -280,8 +331,8 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
   # o JSON grande NÃO cabe no argv.
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --slurpfile s "$jf" \
     '($s[0] // {}) as $src
-     | {id:$id, repo:$r, prob:$p, title:($src.title//""), format:$fmt, collections:($src.collections//[]),
-        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true, docs_rt:true}' > "$d/.moj-id"
+     | {id:$id, repo:$r, prob:$p, title:($src.title//""), titles:($src.titles//{}), format:$fmt, collections:($src.collections//[]),
+        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true, docs_rt:true, trans_rt:true}' > "$d/.moj-id"
   rm -rf "$T" "${_t:-}"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
@@ -929,7 +980,8 @@ cmd_upload(){ need_login
       metad="$(mktemp -d)"
       jq -s '(.[0]) + ((.[1] // {}) as $mid
              | {collections:($mid.collections // []), languages:($mid.languages // [])}
-             + (if ($mid.title // "") != "" then {display_title:$mid.title} else {} end))' \
+             + (if ($mid.title // "") != "" then {display_title:$mid.title} else {} end)
+             + (if (($mid.titles // {})|length) > 0 then {titles:$mid.titles} else {} end))' \
         <(printf '%s' "$basemeta") "$src/.moj-id" > "$metad/.moj-meta.json" \
         || die "não consegui sintetizar o .moj-meta.json a partir do .moj-id (JSON inválido?)"
     fi
@@ -964,14 +1016,23 @@ cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz
   local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; _b64enc "$1" > "$b64"
   jq -n --arg r "$2" --arg p "${3:-}" --rawfile t "$b64" '{repo:$r, prob:(if $p=="" then null else $p end), tar_b64:$t}' > "$bf"
   api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
-cmd_preview(){ need_login; local d="${1:-.}"; [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
+cmd_preview(){ need_login; local d="." lang=pt
+  while [[ $# -gt 0 ]]; do case "$1" in --lang) lang="${2:-}"; shift 2;; *) d="$1"; shift;; esac; done
+  [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
+  [[ "$lang" =~ ^(pt|en|es)$ ]] || die "--lang aceita pt, en ou es"
+  [[ "$lang" == pt || -f "$d/docs/enunciado.$lang.md" ]] || die "sem docs/enunciado.$lang.md — crie a tradução antes (moj edit → t)."
   # imagens locais de docs/ vão JUNTO (campo images) — o preview do servidor as embute; sem
   # isso, `![](fig.png)` sumia SÓ no preview (o render servido sempre embutiu)
   local t; t="$(mktemp -d)"
   _docs_nd "$d" "$t/imgs" 2>/dev/null
-  local body; body="$(jq -c --slurpfile im "$t/imgs" \
+  # --lang: o texto e o título da tradução, e a explicação traduzida de cada exemplo (sem ela, a PT)
+  local body; body="$(jq -c --slurpfile im "$t/imgs" --arg l "$lang" \
       --arg pid "$([[ -f "$d/.moj-id" ]] && jq -r '.id//""' "$d/.moj-id" || echo '')" \
-      '{title, enunciado_md, enunciado_format, examples}
+      '(if $l == "pt" then {title, enunciado_md, enunciado_format, examples}
+        else (.translations[$l] // {}) as $tr
+          | {title:(if ($tr.title // "") != "" then $tr.title else .title end), enunciado_md:($tr.enunciado_md // ""), enunciado_format:"md",
+             examples:(.examples | map(. + (if (($tr.notes // {})[.name] // "") != "" then {explanation:$tr.notes[.name]} else {} end)))} end)
+       + {lang:$l}
        + (if ($im|length) > 0 then {images:$im} else {} end)
        + (if $pid != "" then {id:$pid} else {} end)' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp)"; mv "$out" "$out.html"; out="$out.html"   # sem mktemp --suffix (BSD não tem)
@@ -1114,6 +1175,40 @@ edit_colls(){ local d="$1" cur; cur="$(jq -r '(.collections//[])|join(",")' "$d/
     c) local n; n="$(ask '  nome da coleção (pode ter espaços): ')"
        [[ -n "$n" ]] && { cmd_collection create "$n"; mid_set "$d" --arg n "$n" '.collections=((.collections//[])+[$n]|unique)'; };;
   esac; }
+# moj title [dir] [--lang en|es] [<título>] — o título do problema (PT, .moj-id .title) ou da
+# tradução (.moj-id .titles[<lang>] -> `titles` do .moj-meta.json). Sem título: mostra.
+cmd_title(){ local d="." lang=pt t=""
+  while [[ $# -gt 0 ]]; do case "$1" in --lang) lang="${2:-}"; shift 2;; *) if [[ -f "$1/.moj-id" ]]; then d="$1"; else t="$1"; fi; shift;; esac; done
+  [[ -f "$d/.moj-id" ]] || die "'$d' não é um pacote clonado (sem .moj-id) — use moj clone/new antes."
+  [[ "$lang" =~ ^(pt|en|es)$ ]] || die "--lang aceita pt, en ou es"
+  if [[ -z "$t" ]]; then
+    printf 'título (pt): %s\n' "$(mid "$d" title)"
+    jq -r '(.titles // {}) | to_entries[] | "título (\(.key)): \(.value)"' "$d/.moj-id" 2>/dev/null
+    return 0
+  fi
+  if [[ "$lang" == pt ]]; then mid_set "$d" --arg t "$t" '.title=$t'
+  else mid_set "$d" --arg l "$lang" --arg t "$t" '.titles=((.titles//{}) + {($l):$t})'; fi
+  echo "título ($lang): $t  — aplica no próximo push/SALVAR"; }
+# tradução do enunciado/editorial no editor interativo (arquivos docs/*.<lang>.md + título)
+edit_trans(){ local d="$1" l
+  echo; echo "Traduções do enunciado (o português é docs/enunciado.md):"
+  for l in en es; do printf '  %s: %s%s\n' "$l" "$([[ -f "$d/docs/enunciado.$l.md" ]] && echo 'enunciado' || echo '—')" \
+    "$([[ -f "$d/docs/solucao.$l.md" ]] && echo ' + editorial' || true)"; done
+  l="$(ask '  idioma (en/es) ou [v]oltar: ')"; [[ "$l" =~ ^(en|es)$ ]] || return 0
+  case "$(ask "  [$l] [e]nunciado  [t]ítulo  [n]ota de exemplo N  [r]emover a tradução  [v]oltar: ")" in
+    e) "$ED" "$d/docs/enunciado.$l.md" </dev/tty; [[ -s "$d/docs/enunciado.$l.md" ]] || rm -f "$d/docs/enunciado.$l.md";;
+    t) cmd_title "$d" --lang "$l" "$(ask "  título ($l): " "$(jq -r --arg l "$l" '.titles[$l] // ""' "$d/.moj-id")")";;
+    n*) local k; k="$(ask '  qual N? ')"
+        if [[ -f "$d/tests/input/sample$k" ]]; then mkdir -p "$d/docs/notes"; "$ED" "$d/docs/notes/sample$k.$l.md" </dev/tty
+          [[ -s "$d/docs/notes/sample$k.$l.md" ]] || rm -f "$d/docs/notes/sample$k.$l.md"
+        else echo "  sample$k não existe"; fi;;
+    r) rm -f "$d/docs/enunciado.$l.md" "$d/docs/solucao.$l.md" "$d/docs/notes"/*."$l".md 2>/dev/null
+       mid_set "$d" --arg l "$l" 'del(.titles[$l])'; echo "  tradução $l removida localmente — aplica no próximo push";;
+  esac; }
+edit_editorial(){ local d="$1" l
+  l="$(ask '  idioma do editorial (pt/en/es): ' pt)"; [[ "$l" =~ ^(pt|en|es)$ ]] || return 0
+  local f="$d/docs/solucao.md"; [[ "$l" == pt ]] || f="$d/docs/solucao.$l.md"
+  "$ED" "$f" </dev/tty; [[ -s "$f" ]] || rm -f "$f"; }
 cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edit <id|dir>"
   [[ -r /dev/tty ]] || die "moj edit é interativo — precisa de um terminal."
   local D
@@ -1128,6 +1223,8 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
     printf '  7) Soluções (good:%s wrong:%s slow:%s)   8) Conf   9) Coleções: %s\n' "$(ls "$D/sols/good" 2>/dev/null|wc -l)" "$(ls "$D/sols/wrong" 2>/dev/null|wc -l)" "$(ls "$D/sols/slow" 2>/dev/null|wc -l)" "$(jq -r '(.collections//[])|join(",")' "$D/.moj-id")"
     printf '  0) Público: %s   L) Linguagens: %s   r) Compartilhar pasta   v) Pré-visualizar\n' \
       "$(mid "$D" public)" "$(jq -r 'if ((.languages//[])|length)>0 then (.languages|join(",")) else "todas" end' "$D/.moj-id")"
+    printf '  t) Traduções do enunciado (%s)   e) Editorial (pt/en/es)\n' \
+      "$(for l in en es; do [[ -f "$D/docs/enunciado.$l.md" ]] && printf '%s ' "$l"; done | sed 's/ $//; s/^$/nenhuma/')"
     printf '  w) SALVAR (push)   P) Validar & Publicar   i) Info/validação   q) Sair\n'
     case "$(ask '  > ')" in
       1) mid_set "$D" --arg t "$(ask '  Título: ' "$(mid "$D" title)")" '.title=$t';;
@@ -1140,7 +1237,8 @@ cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edi
            cmd_languages "$D" "$nl";;
       0) local p; p="$(mid "$D" public)"; [[ "$p" == true ]] && p=false || p=true; mid_set "$D" --argjson p "$p" '.public=$p'; echo "  (aplica no próximo 'salvar')";;
       r) local act u; act="$(ask '  [a]dd ou [r]emove colaborador? ')"; u="$(ask '  login: ')"; [[ -n "$u" ]] && { [[ "$act" == r ]] && cmd_unshare "$(mid "$D" repo)" "$u" || cmd_share "$(mid "$D" repo)" "$u"; };;
-      v) cmd_preview "$D";;
+      v) local pl; pl="$(ask '  idioma do preview (pt/en/es): ' pt)"; cmd_preview "$D" --lang "${pl:-pt}";;
+      t) edit_trans "$D";; e) edit_editorial "$D";;
       w) cmd_push "$D"; local want; want="$(mid "$D" public)"; cmd_public "$id" "$([[ "$want" == true ]] && echo on || echo off)" >/dev/null 2>&1 || true; echo "  salvo.";;
       P) cmd_push "$D" >/dev/null && cmd_publish "$id";;
       i) cmd_status "$id";;
@@ -1157,6 +1255,9 @@ exec_layer(){ local layer="$1"; shift
   die "camada '$layer' não instalada: curl -fLO $MOJ_URL/moj-$layer && chmod +x moj-$layer"
 }
 
+# MOJ_CLI_LIB_ONLY=1 + `source moj`: só define as funções (é como test/translations.sh exercita
+# pkg_to_json/json_to_pkg sem rede). Executado normalmente, a variável não existe e nada muda.
+if [[ "${MOJ_CLI_LIB_ONLY:-0}" == 1 ]]; then return 0 2>/dev/null || exit 0; fi
 # --json ANTES do subcomando = saída crua da API nos leitores (ls/board/status/check)
 while [[ "${1:-}" == --json ]]; do RAW=1; shift; done
 cmd="${1:-help}"; shift || true
@@ -1176,7 +1277,7 @@ case "$cmd" in
   calib) cmd_calib "$@";; calib-report) cmd_calib_report "$@";;
   testrun|test-run) cmd_testrun "$@";; testrun-status) cmd_testrun_status "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
-  languages|langs|lang) cmd_languages "$@";;
+  languages|langs|lang) cmd_languages "$@";; title|titulo) cmd_title "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
   help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
   *) die "comando desconhecido: $cmd (veja 'moj help')";;

@@ -113,7 +113,8 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj checker <dir> <checker.cpp> [--force]` | Instala um checker testlib. Exige o mojtools local (`MOJTOOLS_DIR`). Recusa sobrescrever um `scripts/` existente. `--force` substitui. | `moj checker ./p chk.cpp` |
 | `moj interactive <dir> <arbitro> [--score]` | Instala o driver de problema interativo. Exige o mojtools local. | `moj interactive ./p arb.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Instala os drivers de submissão de função em 5 linguagens, com sentinela anti-IO. Exige o mojtools local. | `moj fn ./p --langs c,py` |
-| `moj preview [dir]` | Renderiza o enunciado em HTML e abre no navegador. | `moj preview` |
+| `moj preview [dir] [--lang en\|es]` | Renderiza o enunciado em HTML e abre no navegador. `--lang` renderiza a tradução, com o título e as explicações traduzidas. | `moj preview --lang en` |
+| `moj title [dir] [--lang en\|es] [<título>]` | Mostra ou define o título. Com `--lang`, o título da tradução. Grava no `.moj-id`. Aplica no próximo `push`. | `moj title . --lang en "Sum"` |
 | `moj download <id> [arq] [--sha <sha>]` | Baixa o pacote inteiro. `--sha` baixa a versão daquele commit. | `moj download apc#vetor1` |
 | `moj upload <id> [dir\|arq] [--force]` | Sobe o pacote inteiro. Um diretório é empacotado pela CLI. A CLI exclui `.git`, caches e `.moj-id`, e gera um `.moj-meta.json` com título, coleções e linguagens do `.moj-id`. Formatos: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. Meta ausente preserva o que está no servidor. Tar sem o arquivo `tags` preserva as tags. | `moj upload apc#vetor1 ./vetor1` |
 | `moj languages <dir> [c,cpp,py,…\|all]` | Define a lista de linguagens de submissão do problema. Sem argumento, mostra a lista. `all` libera todas as padrão. Grava no `.moj-id`. Aplica no próximo `push`. Obrigatória em problema de função ou de ban: sem ela, trocar a linguagem burla o driver. | `moj languages ./p c,py` |
@@ -149,10 +150,13 @@ injeta o `<h1>`. Um `% Título` no topo do enunciado é legado. O renderizador o
 
 ```
 <prob>/
-  docs/enunciado.md         # enunciado (.md | .org | .tex). Exige as seções ## Entrada e ## Saída.
+  docs/enunciado.md         # enunciado em português (.md | .org | .tex). Exige ## Entrada e ## Saída.
                             #   Sem "% Título" (o título é campo). Imagens: base64 embutido.
-  docs/sample-notes.json    # (opcional) explicação de cada exemplo, na ordem
+  docs/enunciado.en.md      # (opcional) a tradução (en, es). Mesmas seções (## Input / ## Output).
+  docs/notes/sample1.md     # (opcional) explicação de cada exemplo (1 markdown por exemplo)
+  docs/notes/sample1.en.md  # (opcional) a explicação traduzida. Sem ela, o exemplo mostra a PT.
   docs/solucao.md           # (opcional) editorial. Só o autor vê. Não vai ao aluno.
+  docs/solucao.en.md        # (opcional) o editorial traduzido (entra no documento de editorial em EN).
   conf                      # TL, ulimits, STOPWHEN. Atalhos no 'moj edit', opção 8.
   author                    # autores, 1 linha
   tags                      # 1 tag por linha
@@ -163,9 +167,15 @@ injeta o `<h1>`. Um `% Título` no topo do enunciado é legado. O renderizador o
   scripts/                  # (opcional) correção especial (compile, compare, checker, árbitro).
                             #   Viaja no push e no clone: conteúdo, +x e symlinks.
                             #   Mexer em scripts/ dispara recalibração no juiz.
-  .moj-id                   # ponteiro local (id, repo, prob, título, coleções, linguagens, público).
-                            #   Não é enviado.
+  .moj-id                   # ponteiro local (id, repo, prob, título, títulos das traduções,
+                            #   coleções, linguagens, público). Não é enviado.
 ```
+
+**Idiomas.** O português é obrigatório. Uma tradução é um arquivo ao lado, com o código do idioma
+no nome. O título da tradução fica no `.moj-id` (`titles`): `moj title . --lang en "Hello World"`.
+No `moj edit`, a opção `t` cuida das traduções e a opção `e` do editorial em cada idioma. `moj push`
+e `moj clone` levam e trazem tudo. Em um clone, remover `docs/enunciado.en.md` e dar `push` remove
+a tradução no servidor.
 
 No servidor, os metadados ficam em `.moj-meta.json`: `display_title`, `public`, `collections`,
 `languages`, `owner`. O servidor gera esse arquivo a partir do que você envia. Você não o edita.
@@ -187,8 +197,9 @@ servidor. `public` e `owner` nunca vêm do tar.
 | Comando | O que faz |
 |---|---|
 | `login <cid\|url>` | Entra no contest com as credenciais da organização. |
-| `fetch` | Baixa todos os enunciados. Você trabalha sem rede. |
-| `problems` · `score` · `news` | Lista problemas · mostra o placar · mostra avisos. |
+| `fetch` | Baixa todos os enunciados, em todos os idiomas que a prova oferece (`A.html`, `A.en.html`…). Você trabalha sem rede. |
+| `problems` · `score` · `news` | Lista problemas (com os idiomas do enunciado de cada um) · mostra o placar · mostra avisos. |
+| `statement <letra> [--lang en\|es]` | Baixa um enunciado. Sem `--lang`, todos os idiomas oferecidos. Com um idioma que a prova não oferece, a CLI recusa e lista os disponíveis. |
 | `submit <letra> <arquivo>` | Envia e espera o veredicto. |
 | `subs` | Lista as suas submissões e veredictos. |
 | `clar ls` · `clar ask <letra\|geral> <texto>` | Lista e faz perguntas aos juízes. |
@@ -208,8 +219,9 @@ Vários subcomandos aceitam um apelido em português: `baixar` = `fetch`, `notic
 `test-run` = `testrun`. Use o que preferir.
 
 A mesma CLI atende o treino livre, sem o modo offline. Rode `moj-comp login treino` com a conta do
-site. Depois use `problems <busca>`, `statement <org#slug>`, `submit <org#slug> <arquivo>` e
-`subs`. O guia do treino está em `/treino/cli.html`.
+site. Depois use `problems <busca>`, `statement <org#slug> [--lang en]` (grava `slug.html` e um
+`slug.<lang>.html` por tradução), `submit <org#slug> <arquivo>` e `subs`. O guia do treino está em
+`/treino/cli.html`.
 
 ## Gestão de contest (`moj-contest` / `moj contest …`)
 

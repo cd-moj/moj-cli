@@ -112,7 +112,8 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj checker <dir> <checker.cpp> [--force]` | Installs a testlib checker. It requires local mojtools (`MOJTOOLS_DIR`). It refuses to overwrite an existing `scripts/`. `--force` replaces it. | `moj checker ./p chk.cpp` |
 | `moj interactive <dir> <referee> [--score]` | Installs the interactive-problem driver. It requires local mojtools. | `moj interactive ./p ref.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Installs the function-submission drivers in 5 languages, with an anti-IO sentinel. It requires local mojtools. | `moj fn ./p --langs c,py` |
-| `moj preview [dir]` | Renders the statement as HTML and opens it in the browser. | `moj preview` |
+| `moj preview [dir] [--lang en\|es]` | Renders the statement as HTML and opens it in the browser. `--lang` renders the translation, with the translated title and explanations. | `moj preview --lang en` |
+| `moj title [dir] [--lang en\|es] [<title>]` | Shows or sets the title. With `--lang`, the title of the translation. It writes to `.moj-id`. It applies on the next `push`. | `moj title . --lang en "Sum"` |
 | `moj download <id> [file] [--sha <sha>]` | Downloads the whole package. `--sha` downloads the version of that commit. | `moj download apc#vetor1` |
 | `moj upload <id> [dir\|file] [--force]` | Uploads the whole package. The CLI packs a directory. It excludes `.git`, caches and `.moj-id`, and generates a `.moj-meta.json` with the title, collections and languages from `.moj-id`. Formats: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. A missing meta keeps the server values. A tar without the `tags` file keeps the tags. | `moj upload apc#vetor1 ./vetor1` |
 | `moj languages <dir> [c,cpp,py,…\|all]` | Sets the list of submission languages of the problem. Without an argument, it shows the list. `all` allows all standard languages. It writes to `.moj-id`. It applies on the next `push`. Required for function or ban problems: without it, a language switch bypasses the driver. | `moj languages ./p c,py` |
@@ -148,10 +149,13 @@ Because of this, `moj push` and `moj upload` require a title.
 
 ```
 <prob>/
-  docs/enunciado.md         # statement (.md | .org | .tex). It requires the sections ## Entrada and ## Saída.
+  docs/enunciado.md         # statement in Portuguese (.md | .org | .tex). It requires ## Entrada and ## Saída.
                             #   No "% Título" (the title is a field). Images: embedded base64.
-  docs/sample-notes.json    # (optional) explanation of each example, in order
+  docs/enunciado.en.md      # (optional) the translation (en, es). Same sections (## Input / ## Output).
+  docs/notes/sample1.md     # (optional) explanation of each example (1 markdown per example)
+  docs/notes/sample1.en.md  # (optional) the translated explanation. Without it, the example shows the PT one.
   docs/solucao.md           # (optional) editorial. Only the author sees it. It never goes to the student.
+  docs/solucao.en.md        # (optional) the translated editorial (goes into the EN editorial document).
   conf                      # TL, ulimits, STOPWHEN. Shortcuts in 'moj edit', option 8.
   author                    # authors, 1 line
   tags                      # 1 tag per line
@@ -162,9 +166,15 @@ Because of this, `moj push` and `moj upload` require a title.
   scripts/                  # (optional) special judging (compile, compare, checker, referee).
                             #   It travels in push and clone: content, +x and symlinks.
                             #   A change in scripts/ triggers recalibration on the judge.
-  .moj-id                   # local pointer (id, repo, prob, title, collections, languages, public).
-                            #   It is not uploaded.
+  .moj-id                   # local pointer (id, repo, prob, title, translated titles,
+                            #   collections, languages, public). It is not uploaded.
 ```
+
+**Languages.** Portuguese is required. A translation is a file next to it, with the language code
+in the name. The title of the translation lives in `.moj-id` (`titles`): `moj title . --lang en
+"Hello World"`. In `moj edit`, option `t` handles translations and option `e` the editorial in each
+language. `moj push` and `moj clone` carry everything. In a clone, removing `docs/enunciado.en.md`
+and running `push` removes the translation on the server.
 
 On the server, the metadata lives in `.moj-meta.json`: `display_title`, `public`, `collections`,
 `languages`, `owner`. The server generates this file from what you send. You do not edit it.
@@ -186,8 +196,9 @@ field or `[]` keeps the server value. `public` and `owner` never come from the t
 | Command | What it does |
 |---|---|
 | `login <cid\|url>` | Logs into the contest with the credentials from the organization. |
-| `fetch` | Downloads all statements. You work without network. |
-| `problems` · `score` · `news` | Lists problems · shows the scoreboard · shows announcements. |
+| `fetch` | Downloads all statements, in every language the contest offers (`A.html`, `A.en.html`…). You work without network. |
+| `problems` · `score` · `news` | Lists problems (with the statement languages of each one) · shows the scoreboard · shows announcements. |
+| `statement <letter> [--lang en\|es]` | Downloads one statement. Without `--lang`, every offered language. With a language the contest does not offer, the CLI refuses and lists the available ones. |
 | `submit <letter> <file>` | Submits and waits for the verdict. |
 | `subs` | Lists your submissions and verdicts. |
 | `clar ls` · `clar ask <letter\|geral> <text>` | Lists and asks questions to the judges. |
@@ -207,8 +218,9 @@ Several subcommands accept a Portuguese alias: `baixar` = `fetch`, `noticias` = 
 `test-run` = `testrun`. Use the one you prefer.
 
 The same CLI serves open training, without the offline mode. Run `moj-comp login treino` with your
-site account. Then use `problems <search>`, `statement <org#slug>`, `submit <org#slug> <file>` and
-`subs`. The training guide is at `/treino/cli.html`.
+site account. Then use `problems <search>`, `statement <org#slug> [--lang en]` (writes `slug.html`
+and one `slug.<lang>.html` per translation), `submit <org#slug> <file>` and `subs`. The training
+guide is at `/treino/cli.html`.
 
 ## Contest management (`moj-contest` / `moj contest …`)
 
