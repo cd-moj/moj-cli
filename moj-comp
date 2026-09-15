@@ -177,6 +177,7 @@ _stmt_all(){ local letter="$1" base="$2" only="${3:-}" langs l sfx got=""
   langs="$(_letter_langs "$letter")"; langs="${langs//,/ }"
   if [[ -n "$only" ]]; then [[ " $langs " == *" $only "* ]] || return 1; langs="$only"; fi
   for l in $langs; do
+    [[ "$l" =~ ^(pt|en|es)$ ]] || continue          # o idioma vira NOME DE ARQUIVO: só a allowlist
     sfx=""; [[ "$l" != pt ]] && sfx=".$l"
     _stmt_get "$letter" html "$base$sfx.html" "$l" && got="${got:+$got }$base$sfx.html"
     _stmt_get "$letter" pdf  "$base$sfx.pdf"  "$l" && got="${got:+$got }$base$sfx.pdf"

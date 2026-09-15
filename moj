@@ -150,14 +150,18 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   # os idiomas — `null` p/ o que não existe localmente (= apaga no servidor o que foi removido aqui,
   # como o scripts_files); clone antigo (sem a flag e sem tradução local) não apaga a tradução de ninguém.
   _trans_nd "$d" "$t/trans"
-  local trflag=n
-  { [[ -s "$t/trans" ]] || [[ "$(jq -r '.trans_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]]; } && trflag=y
+  # trflag: y = manda o campo (há tradução local OU o clone é ciente); rtflag2: y = clone CIENTE
+  # (completa com `null` os idiomas sem arquivo = apaga no servidor). Clone antigo COM tradução
+  # local manda só o que tem — nunca apaga a tradução de ninguém.
+  local trflag=n trrt=n
+  [[ "$(jq -r '.trans_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]] && trrt=y
+  { [[ -s "$t/trans" ]] || [[ "$trrt" == y ]]; } && trflag=y
   jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
         --argjson titles "$([[ -f "$d/.moj-id" ]] && jq -c '.titles//{}' "$d/.moj-id" || echo '{}')" \
-        --slurpfile trs "$t/trans" --arg trflag "$trflag" \
+        --slurpfile trs "$t/trans" --arg trflag "$trflag" --arg trrt "$trrt" \
         --argjson colls "$([[ -f "$d/.moj-id" ]] && jq -c '.collections//[]' "$d/.moj-id" || echo '[]')" \
         --argjson langs "$([[ -f "$d/.moj-id" ]] && jq -c '.languages//[]' "$d/.moj-id" || echo '[]')" \
         --slurpfile exs "$t/exs" --slurpfile tss "$t/tss" --slurpfile scr "$t/scr" \
@@ -171,7 +175,7 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
     + (if $rtflag=="y" then {scripts_files:$scr, score_text:$scoretxt} else {} end)
     + (if $dfflag=="y" then {docs_files:$dfl} else {} end)
     + (if $edflag=="y" then {editorial_md:$editorial} else {} end)
-    + (if $trflag=="y" then {translations:(($trs|from_entries) as $t | {en:($t.en // null), es:($t.es // null)}), titles:$titles} else {} end)'
+    + (if $trflag=="y" then {translations:((if $trrt=="y" then {en:null, es:null} else {} end) + ($trs|from_entries)), titles:$titles} else {} end)'
   rm -rf "$t"; }
 # _trans_nd <dir> <outfile> — NDJSON {key:<lang>, value:{title,enunciado_md,editorial_md?,notes?}}
 # por idioma (en, es) que tem enunciado, editorial OU nota traduzida. Conteúdo via --rawfile.

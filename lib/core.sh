@@ -160,6 +160,11 @@ auth_hdr_file(){ local c tf h; c="${1:-$CONTEST}"; tf="$(token_file "$c")"; h="$
 _api_fail(){
   local code="$1" out="$2" msg
   msg="$(jq -r '.error.message // .message // empty' <<<"$out" 2>/dev/null || true)"
+  # 409 com `blockers` (promoção de rodada): mostra cada bloqueador — sem isso a CLI só dizia
+  # "não está pronta" e o admin não sabia o quê resolver
+  local _bl; _bl="$(jq -r '.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$out" 2>/dev/null || true)"
+  [[ -n "$_bl" ]] && msg="$msg
+$_bl"
   # gate de navegador por sede: a CLI só entra na MÁQUINA DE PROVA (lê /etc/moj/user-agent)
   if [[ "$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)" == ua_gate ]]; then
     msg="$msg

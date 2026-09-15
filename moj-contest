@@ -657,7 +657,7 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       if [[ "$(jq -r '.promote_ready.ok' <<<"$st")" != true && "$force" != true ]]; then
         echo "a rodada no ar NÃO está pronta p/ ser promovida:" >&2
         jq -r '.promote_ready.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$st" >&2
-        die "resolva os bloqueadores (ou use --force, que arquiva do mesmo jeito)"
+        die "resolva os bloqueadores. --force passa por cima dos avisos, mas NÃO de no_next_round, freeze_locked (descongelar só a partir do fim geral + 1 min) e problem_denied"
       fi
       echo "isto ARQUIVA a rodada '$(jq -r '.active' <<<"$st")' e ZERA o placar; '$to' entra no ar." >&2
       local c; read -rp "confirme digitando o id do contest ($CONTEST): " c || true

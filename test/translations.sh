@@ -41,10 +41,10 @@ echo "== clone antigo (sem trans_rt, sem tradução local): NÃO manda translati
 Q="$T/q"; cp -r "$P" "$Q"; rm -f "$Q/docs/enunciado.en.md" "$Q/docs/solucao.en.md" "$Q/docs/notes"/*.en.md
 jq 'del(.trans_rt) | del(.titles)' "$P/.moj-id" > "$Q/.moj-id"
 chk "sem campo translations"                     '! jq -e "has(\"translations\")" <<<"$(pkg_to_json "$Q")" >/dev/null'
-echo "== clone antigo COM tradução local manda só o que tem =="
+echo "== clone antigo COM tradução local manda só o que tem (NUNCA null p/ os outros idiomas) =="
 printf 'Lea N.\n\n## Entrada\n\nx\n\n## Salida\n\ny\n' > "$Q/docs/enunciado.es.md"
 J2="$(pkg_to_json "$Q")"
-chk "es presente, en null"                       '[[ "$(jq -r ".translations.es.enunciado_md" <<<"$J2")" == "Lea N."* && "$(jq -c ".translations.en" <<<"$J2")" == null ]]'
+chk "es presente e en AUSENTE (não apaga o en do servidor)" '[[ "$(jq -r ".translations.es.enunciado_md" <<<"$J2")" == "Lea N."* ]] && ! jq -e ".translations | has(\"en\")" <<<"$J2" >/dev/null'
 
 echo "== json_to_pkg: o caminho de volta =="
 R="$T/r"; printf '%s' "$J" | jq '. + {title:"Eco", format:"md"}' > "$T/src.json"
