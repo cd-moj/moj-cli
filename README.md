@@ -243,7 +243,7 @@ O contest alvo vem de `-c <cid>` ou de `MOJ_CONTEST`.
 | Comando | O que faz | Exemplo |
 |---|---|---|
 | `login <cid> [-u login]` · `logout [<cid>]` · `whoami` | Gerencia a sessão por contest. | `moj-contest login prova1 -u ana.admin` |
-| `create [spec.json\|-] [--template <nome>] [--id --name --start --end] [--empty] [--modules a,b]` | Cria o contest. Aceita um spec JSON, um template salvo, ou os dois. Exige ao menos um problema. `--empty` cria a sala vazia. `--modules` liga módulos na criação. | `moj-contest create --empty --id lab1 --name "Lab 1" --end 1790000000 --modules maquinas` |
+| `create [spec.json\|-] [--template <nome>] [--id --name --start --end] [--mode icpc\|obi\|treino\|heuristic] [--empty] [--modules a,b]` | Cria o contest. Aceita um spec JSON, um template salvo, ou os dois. Exige ao menos um problema. `--mode` escolhe o placar (padrão `icpc`; `obi` = pontuação por teste; `treino` = lista de exercícios; `heuristic`). O modo não muda depois da criação: para trocar, exporte o spec, edite `mode` e crie de novo. `--empty` cria a sala vazia. `--modules` liga módulos na criação. | `moj-contest create --empty --id lab1 --name "Lab 1" --mode obi --end 1790000000` |
 | `list` · `show <cid>` | Lista os seus contests · mostra o resumo de um, com os módulos ligados. | `moj-contest show lab1` |
 | `export <cid> [arq] [--full]` | Grava o spec do contest em um arquivo. Sem credenciais. Traz a seção `modules{}` com os dados de cada módulo ligado. Sem segredos. | `moj-contest export lab1` |
 | `duplicate <cid> [--id --name --start --end]` | Copia um contest. Sem usuários. O plano de rodadas acompanha as datas novas. | `moj-contest duplicate lab1 --id lab2` |
@@ -283,7 +283,8 @@ Você não precisa ligar um módulo antes de usar o recurso. Um comando que grav
 liga o módulo sozinho: `rounds add` liga `rodadas`, `cohorts add` liga `coortes`, `ua-gate set`
 liga `maquinas`, `docs gen` liga `documentos`. Só desligar é manual.
 
-O spec JSON do `create` leva a seção `modules{}`. Cada chave é um módulo. O valor é `true` ou um
+O campo `mode` do spec escolhe o placar: `icpc` (padrão), `obi`, `treino` ou `heuristic` (a flag
+`--mode` grava o mesmo campo). O spec JSON do `create` leva a seção `modules{}`. Cada chave é um módulo. O valor é `true` ou um
 objeto com os dados do módulo. Um objeto presente liga o módulo, exceto com `on: false`.
 
 ```json

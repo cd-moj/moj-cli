@@ -10,9 +10,12 @@
 #   moj-contest login <cid> [-u login]   Entra no contest.
 #   moj-contest logout [<cid>] | whoami  Sai. Mostra quem você é.
 #   moj-contest create [spec.json|-] [--template <nome>] [--id X] [--name N] [--start E] [--end E]
-#                      [--empty] [--modules a,b,c]
+#                      [--mode icpc|obi|treino|heuristic] [--empty] [--modules a,b,c]
 #       Cria o contest. Exige ao menos um problema. --empty cria a sala vazia; os problemas entram
 #       depois com `-c <cid> problems add`. O contest entra no ar na hora. --modules liga módulos.
+#       --mode escolhe o placar: icpc (padrão), obi (pontuação por teste), treino (lista de
+#       exercícios) ou heuristic. O modo não muda depois da criação: para trocar, exporte o spec,
+#       edite o campo mode e crie de novo.
 #       No spec, a seção modules{} leva os dados de cada módulo: sedes, balões, coortes, gate de
 #       UA, rodadas, documentos, inscrições, telão e classificação. Veja `moj-contest modules`.
 #   moj-contest list                     Lista os contests criados por você.
@@ -130,11 +133,12 @@ cmd_whoami(){ need_contest; need_login
 
 # ---- criação / reuso (sessão do treino) ---------------------------------------------------
 cmd_create(){ need_login_t
-  local specf="" tpl="" id="" name="" start="" end="" empty=0 mods="" a
+  local specf="" tpl="" id="" name="" start="" end="" empty=0 mods="" mode="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in
       --template) tpl="$1"; shift;;
       --modules) mods="$1"; shift;;
+      --mode) mode="${1:-}"; shift;;
       --id) id="$1"; shift;;
       --name) name="$1"; shift;;
       --start) start="$1"; shift;;
@@ -159,6 +163,13 @@ cmd_create(){ need_login_t
       | ($base + (if $base.login_lead then {login_start:($st - $base.login_lead)} else {} end)
                + (if $base.freeze_before_end then {freeze:($base.end - $base.freeze_before_end)} else {} end)
          | del(.duration, .login_lead, .freeze_before_end)) + $s')"
+  fi
+  # --mode vence o spec/template (como --id/--name). A mesma allowlist do servidor; `outro` é só de
+  # admin e o servidor recusa com 403 — aqui a mensagem já diz os valores certos.
+  if [[ -n "$mode" ]]; then
+    mode="${mode,,}"
+    [[ "$mode" =~ ^(icpc|obi|treino|heuristic|outro)$ ]] || die "--mode aceita icpc, obi, treino ou heuristic (outro = só admin) — recebi '$mode'"
+    spec="$(jq -c --arg v "$mode" '.mode=$v' <<<"$spec")"
   fi
   [[ -n "$id" ]] && spec="$(jq -c --arg v "$id" '.id=$v' <<<"$spec")"
   [[ -n "$name" ]] && spec="$(jq -c --arg v "$name" '.name=$v' <<<"$spec")"

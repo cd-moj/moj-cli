@@ -241,7 +241,7 @@ The target contest comes from `-c <cid>` or from `MOJ_CONTEST`.
 | Command | What it does | Example |
 |---|---|---|
 | `login <cid> [-u login]` · `logout [<cid>]` · `whoami` | Manages the per-contest session. | `moj-contest login prova1 -u ana.admin` |
-| `create [spec.json\|-] [--template <name>] [--id --name --start --end] [--empty] [--modules a,b]` | Creates the contest. It accepts a JSON spec, a saved template, or both. It requires at least one problem. `--empty` creates the empty room. `--modules` turns modules on at creation. | `moj-contest create --empty --id lab1 --name "Lab 1" --end 1790000000 --modules maquinas` |
+| `create [spec.json\|-] [--template <name>] [--id --name --start --end] [--mode icpc\|obi\|treino\|heuristic] [--empty] [--modules a,b]` | Creates the contest. It accepts a JSON spec, a saved template, or both. It requires at least one problem. `--mode` picks the scoreboard (default `icpc`; `obi` = score per test; `treino` = exercise list; `heuristic`). The mode does not change after creation: to switch, export the spec, edit `mode` and create again. `--empty` creates the empty room. `--modules` turns modules on at creation. | `moj-contest create --empty --id lab1 --name "Lab 1" --mode obi --end 1790000000` |
 | `list` · `show <cid>` | Lists your contests · shows the summary of one, with the enabled modules. | `moj-contest show lab1` |
 | `export <cid> [file] [--full]` | Writes the contest spec to a file. Without credentials. It carries the `modules{}` section with the data of each enabled module. Without secrets. | `moj-contest export lab1` |
 | `duplicate <cid> [--id --name --start --end]` | Copies a contest. Without users. The round plan follows the new dates. | `moj-contest duplicate lab1 --id lab2` |
