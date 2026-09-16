@@ -197,9 +197,10 @@ servidor. `public` e `owner` nunca vêm do tar.
 | Comando | O que faz |
 |---|---|
 | `login <cid\|url>` | Entra no contest com as credenciais da organização. |
-| `fetch` | Baixa todos os enunciados, em todos os idiomas que a prova oferece (`A.html`, `A.en.html`…). Você trabalha sem rede. |
+| `fetch` | Baixa todos os enunciados, em todos os idiomas que a prova oferece (`A.html`, `A.en.html`…), e os exemplos de cada problema em `samples/<letra>/`. Você trabalha sem rede. |
 | `problems` · `score` · `news` | Lista problemas (com os idiomas do enunciado de cada um) · mostra o placar · mostra avisos. |
 | `statement <letra> [--lang en\|es]` | Baixa um enunciado. Sem `--lang`, todos os idiomas oferecidos. Com um idioma que a prova não oferece, a CLI recusa e lista os disponíveis. |
+| `samples <letra> [--dir pasta]` | Baixa os exemplos do enunciado como arquivos: `samples/<letra>/<nome>.in` e `.out`. `fetch` já faz isso para todos os problemas (pasta `samples/` do kit). Um enunciado enviado pronto pela organização não tem exemplos como arquivo: a CLI avisa. |
 | `submit <letra> <arquivo>` | Envia e espera o veredicto. |
 | `subs` | Lista as suas submissões e veredictos. |
 | `clar ls` · `clar ask <letra\|geral> <texto>` | Lista e faz perguntas aos juízes. |
@@ -220,7 +221,8 @@ Vários subcomandos aceitam um apelido em português: `baixar` = `fetch`, `notic
 
 A mesma CLI atende o treino livre, sem o modo offline. Rode `moj-comp login treino` com a conta do
 site. Depois use `problems <busca>`, `statement <org#slug> [--lang en]` (grava `slug.html` e um
-`slug.<lang>.html` por tradução), `submit <org#slug> <arquivo>` e `subs`. O guia do treino está em
+`slug.<lang>.html` por tradução), `samples <org#slug>` (os exemplos em `samples/<slug>/`),
+`submit <org#slug> <arquivo>` e `subs`. O guia do treino está em
 `/treino/cli.html`.
 
 ## Gestão de contest (`moj-contest` / `moj contest …`)

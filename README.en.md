@@ -196,9 +196,10 @@ field or `[]` keeps the server value. `public` and `owner` never come from the t
 | Command | What it does |
 |---|---|
 | `login <cid\|url>` | Logs into the contest with the credentials from the organization. |
-| `fetch` | Downloads all statements, in every language the contest offers (`A.html`, `A.en.html`…). You work without network. |
+| `fetch` | Downloads all statements, in every language the contest offers (`A.html`, `A.en.html`…), and the samples of each problem in `samples/<letter>/`. You work without network. |
 | `problems` · `score` · `news` | Lists problems (with the statement languages of each one) · shows the scoreboard · shows announcements. |
 | `statement <letter> [--lang en\|es]` | Downloads one statement. Without `--lang`, every offered language. With a language the contest does not offer, the CLI refuses and lists the available ones. |
+| `samples <letter> [--dir folder]` | Downloads the statement samples as files: `samples/<letter>/<name>.in` and `.out`. `fetch` already does this for every problem (the kit's `samples/` folder). A statement uploaded ready-made by the organization has no samples as files: the CLI says so. |
 | `submit <letter> <file>` | Submits and waits for the verdict. |
 | `subs` | Lists your submissions and verdicts. |
 | `clar ls` · `clar ask <letter\|geral> <text>` | Lists and asks questions to the judges. |

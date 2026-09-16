@@ -29,7 +29,9 @@ case "$url" in
   */contest/statement*problem=A*format=pdf*lang=en*) body='%PDF-A-EN';;
   */contest/statement*problem=B*format=html*lang=pt*) body='<html>PT B</html>';;
   */contest/statement*) code=404; body='{"success":false,"error":{"code":"statement_notfound"}}';;
-  */treino/problem?id=*) body="{\"success\":true,\"id\":\"col#pa\",\"title\":\"Eco\",\"statement_langs\":[\"pt\",\"en\"],\"statement_html_b64\":\"$(printf '<html>PT TREINO</html>' | base64 -w0)\",\"statements\":{\"en\":{\"title\":\"Echo\",\"html_b64\":\"$(printf '<html>EN TREINO</html>' | base64 -w0)\"}}}";;
+  */contest/samples*problem=A*) body='{"success":true,"problem":"A","problem_id":"col#pa","samples":[{"name":"sample1","input":"1 2\n","output":"3\n"},{"name":"sample2","input":"5\n","output":"5\n"}]}';;
+  */contest/samples*) body='{"success":true,"problem":"B","problem_id":"col#pb","samples":[]}';;
+  */treino/problem?id=*) body="{\"success\":true,\"id\":\"col#pa\",\"title\":\"Eco\",\"samples\":[{\"name\":\"sample1\",\"input\":\"9\\n\",\"output\":\"9\\n\"}],\"statement_langs\":[\"pt\",\"en\"],\"statement_html_b64\":\"$(printf '<html>PT TREINO</html>' | base64 -w0)\",\"statements\":{\"en\":{\"title\":\"Echo\",\"html_b64\":\"$(printf '<html>EN TREINO</html>' | base64 -w0)\"}}}";;
   */contest/beacon*) body='{"success":true,"server_utc":1,"beacon":"x"}';;
   *) body='{"success":true}';;
 esac
@@ -80,4 +82,25 @@ chk "--lang en: só pa.en.html"           '[[ -s "$T/work/pa.en.html" && ! -e "$
 run treino statement 'col#pa' --lang es > "$T/out" || true
 chk "--lang es: erro com a lista"        '[[ "$(cat "$T/rc")" != 0 ]] && grep -q "idiomas disponíveis: pt, en" "$T/err"'
 
-echo ""; echo "RESULT: $pass passed, $fail failed"; exit $(( fail>0?1:0 ))
+echo ""; echo "== samples A: arquivos .in/.out com bytes exatos =="
+run prova samples A > "$T/out" || true
+chk "samples/A/sample1.in e sample2.out (bytes exatos, com a quebra final)" 'printf "1 2\n" | cmp -s - "$T/work/samples/A/sample1.in" && printf "5\n" | cmp -s - "$T/work/samples/A/sample2.out"'
+chk "mensagem: 2 pares em samples/A"       'grep -q "2 par(es) em ./samples/A/" "$T/out"'
+echo "== samples B: sem exemplos como arquivo (aviso, rc 0) =="
+run prova samples B > "$T/out" || true
+chk "rc 0 e aviso"                         '[[ "$(cat "$T/rc")" == 0 ]] && grep -q "sem exemplos como arquivo" "$T/out" && [[ ! -e "$T/work/samples/B/sample1.in" ]]'
+echo "== samples --dir =="
+run prova samples A --dir "$T/work/ex" > "$T/out" || true
+chk "grava na pasta pedida"                '[[ -s "$T/work/ex/A/sample1.out" ]]'
+echo "== fetch traz samples/ no kit =="
+rm -rf "$T/work/prova-prova"; run prova fetch > "$T/out" || true
+chk "kit com samples/A e sem samples/B"    '[[ -s "$T/work/prova-prova/samples/A/sample1.in" && ! -d "$T/work/prova-prova/samples/B" ]]'
+chk "resumo cita os exemplos"              'grep -q "exemplos: 2 par(es) em samples/" "$T/out"'
+echo "== treino: samples org#slug =="
+run treino samples col#pa > "$T/out" || true
+chk "samples/pa/sample1.in = 9"            '[[ "$(cat "$T/work/samples/pa/sample1.in")" == 9 ]]'
+echo "== help cita samples =="
+run prova help > "$T/out" || true
+chk "help tem 'samples <letra>'"           'grep -q "samples <letra>" "$T/out"'
+
+echo "RESULT: $pass passed, $fail failed"; exit $(( fail>0?1:0 ))
