@@ -27,7 +27,8 @@
 # Administração (exigem -c <cid> ou MOJ_CONTEST, e a sessão .admin do contest):
 #   moj-contest -c <cid> modules [list] | on <id[,id…]> | off <id[,id…]>
 #       Gerencia os módulos: sedes, maquinas, rodadas, documentos, baloes, coortes, inscricoes,
-#       telao, classificacao. list mostra ligado/desligado e se há dados. Desligar não apaga dado.
+#       telao, classificacao, virtual (participação virtual: só liga com TODOS os problemas públicos
+#       no treino e contest não-secreto — senão 422 virtual_not_eligible). list mostra ligado/desligado e se há dados. Desligar não apaga dado.
 #       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos.
 #       Gravar o dado de um módulo (rounds add, cohorts add, ua-gate set, docs gen…) liga o
 #       módulo sozinho. Só desligar é manual.
@@ -269,7 +270,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
 cmd_modules(){ need_contest; need_login; local sub="${1:-list}"; shift || true
   case "$sub" in
     list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
-    on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao)"
+    on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual)"
       local ids="$1"; [[ "$ids" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "ids separados por vírgula, sem espaço"
       api POST "/contest/admin/modules$(qc)" "$(jq -cn --arg k "$sub" --arg v "$ids" '{($k): ($v|split(","))}')" \
         | out '"módulos ligados: \(if (.enabled|length) > 0 then (.enabled|join(", ")) else "nenhum" end)"';;
