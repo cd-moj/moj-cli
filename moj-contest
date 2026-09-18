@@ -246,7 +246,7 @@ cmd_remove(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest remove <cid>
 cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
   case "$sub" in
     get) api GET "/contest/admin/settings$(qc)" | { [[ "$RAW" == 1 ]] && cat || jq .; };;
-    set) [[ $# -ge 1 ]] || die "uso: settings set k=v [k=v…]  (ex.: show_code=true languages=c,cpp end=1790000000 name='Prova 1')"
+    set) [[ $# -ge 1 ]] || die "uso: settings set k=v [k=v…]  (ex.: show_log=true languages=c,cpp end=1790000000 name='Prova 1')"
       local body='{}' kv k v
       for kv in "$@"; do
         k="${kv%%=*}"; v="${kv#*=}"
