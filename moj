@@ -531,12 +531,18 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
 cmd_calib(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calib <id>"
   local id="$1" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
-  jq -r '"\(.id)  (checksum \((.checksum // "?")[0:8]))" +
+  jq -r '"\(.id)  (checksum \((.checksum // "?")[0:8])" +
+           (if (.version // "") != "" then ", versão \(.version[0:8])" else "" end) + ")" +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
-  jq -r '(.hosts // [])[] |
-    "— \(.host)  \(.at // 0 | todate)  TL: " + ((.tl // {})|to_entries|map("\(.key)=\(.value)")|join(" ")),
-    (if ((.sols // [])|length) > 0 then
+  # juiz `stale` = calibrou OUTRA versão do pacote: o servidor NÃO manda as sols dele (mostrar a
+  # lista velha fazia o autor ver solução já apagada como se fosse a de agora). Diga isso, em vez
+  # de repetir "ainda não reportou" — que é outra coisa (juiz/mojtools antigos).
+  jq -r '. as $r | (.hosts // [])[] |
+    "— \(.host)  \(.at // 0 | todate)  TL: " + ((.tl // {})|to_entries|map("\(.key)=\(.value)")|join(" ")) +
+      (if .stale then "   ⚠ DESATUALIZADO (versão \((.version // "?")[0:8])) — recalibre" else "" end),
+    (if .stale then "  (as soluções deste juiz são de uma versão anterior do pacote — rode: moj calibrate \($r.id // ""))"
+     elif ((.sols // [])|length) > 0 then
       (.sols[] | "  \(.category)/\(.file) [\(.lang)]: \(.verdict)",
         ((.tests // [])[] | "    \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"))
      else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end)' <<<"$j" 2>/dev/null
