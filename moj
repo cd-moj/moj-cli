@@ -531,8 +531,13 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
 cmd_calib(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calib <id>"
   local id="$1" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
-  jq -r '"\(.id)  (checksum \((.checksum // "?")[0:8])" +
+  jq -r --argjson now "$EPOCHSECONDS" '"\(.id)  (checksum \((.checksum // "?")[0:8])" +
            (if (.version // "") != "" then ", versão \(.version[0:8])" else "" end) + ")" +
+         # EM VOO agora: a calibração leva minutos, e sem esta linha o autor não sabe se esperar
+         (if ((.calibrating // []) | length) > 0 then "\n  ⏳ calibrando: " +
+            ((.calibrating | map((if .host == "" then "na fila" else .host end)
+              + (if (.since // 0) > 0 then " (há \((($now - .since) / 60) | floor) min)" else "" end))) | join(" · "))
+          else "" end) +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
   # juiz `stale` = calibrou OUTRA versão do pacote: o servidor NÃO manda as sols dele (mostrar a
