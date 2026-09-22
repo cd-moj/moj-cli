@@ -72,6 +72,14 @@ _date2epoch(){
 }
 # mtime em epoch (GNU stat -c %Y; BSD stat -f %m)
 _mtime(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+# _hashfiles: caminhos separados por NUL no stdin -> "hash<TAB>caminho" (1 por linha). md5sum (GNU), `md5
+# -r` (BSD/macOS) ou shasum. UM processo por lote (xargs -0), nunca um por arquivo: o manifesto de um pacote
+# com 2.000 testes sai em fração de segundo. Entrada VAZIA = saída vazia (quem chama não manda nada).
+_hashfiles(){
+  if command -v md5sum >/dev/null 2>&1; then xargs -0 md5sum -- 2>/dev/null
+  elif command -v md5 >/dev/null 2>&1; then xargs -0 md5 -r 2>/dev/null
+  else xargs -0 shasum 2>/dev/null; fi | awk '{ h = $1; sub(/^[^ ]+ +\*?/, ""); print h "\t" $0 }'
+}
 # hash curto de uma string (md5sum GNU; md5 -q BSD; shasum último recurso)
 _hash(){ { md5sum 2>/dev/null || md5 -q 2>/dev/null || shasum 2>/dev/null; } <<<"$1" | cut -d' ' -f1 | cut -c1-24; }
 # caminho absoluto resolvendo symlinks (GNU readlink -f; fallback cd/pwd -P + readlink em loop)

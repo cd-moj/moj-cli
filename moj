@@ -3,9 +3,13 @@
 # só do seu login do MOJ. Há dois jeitos de trabalhar:
 #   • Editor interativo (os campos da página):     moj edit <id|pasta>
 #   • Arquivos locais (edite com o seu editor):    moj clone <id> ; edite ; moj push
+#     Alguém mudou o problema na web?               moj pull   (traz as mudanças para a pasta)
 #
 # Conceitos: ORG = quem edita. É o prefixo do id <org>#<prob>. Um problema tem uma org.
 #            COLEÇÃO = rótulo de agrupamento. Um problema pode ter várias. O nome pode ter espaços.
+# Id implícito: dentro da pasta de um problema (ou de uma subpasta dela), o <id> é opcional.
+#   O comando usa o id do .moj-id. Um nome sem a org (moj publish soma) usa a org do .moj-id.
+#   Exceção: moj rm e moj mv sempre pedem o id.
 #
 # Sessão
 #   moj login | whoami | logout           Entra, mostra quem você é, sai.
@@ -13,21 +17,26 @@
 #   moj ls [mine|shared|public]           Lista problemas.
 #   moj repos                             Lista orgs.
 #   moj board                             Mostra o painel dos seus problemas e o que revisar.
-#   moj status [<id>] | check <id>        Sem id: saúde do sistema. Com id: QA do problema
+#   moj status [<id>] | check [<id>]      status sem id: saúde do sistema. check: QA do problema
 #                                         (validação, TL por juiz, solução good sem TL).
 # Pacote
 #   moj new <org> <prob>                  Cria o esqueleto do pacote em ./<prob>.
 #   moj clone <id> [dir]                  Baixa o pacote inteiro.
-#   moj info <id>                         Mostra tudo do problema.
-#   moj edit <id|dir>                     Abre o editor interativo.
-#   moj push [dir] [--force]              Envia o pacote. Leva scripts/ e tests/score.
+#   moj info [<id>]                       Mostra tudo do problema.
+#   moj edit [<id|dir>]                   Abre o editor interativo.
+#   moj push [dir] [--force] [--overwrite]  Envia o pacote. Leva scripts/ e tests/score.
+#                                         Recusa se o problema mudou no servidor depois do seu
+#                                         último clone, pull ou push. --overwrite envia por cima.
+#   moj pull [dir] [--force]              Traz para a pasta as mudanças do servidor (web, outro autor).
+#                                         Recusa se a pasta tem mudanças suas não enviadas.
+#                                         --force guarda a pasta em <pasta>.local-<data> e traz a versão.
 #   moj test [dir] [--run [sol]]          Faz o pré-voo local. --run julga com o mojtools
 #                                         (exige Linux com bwrap real). Confere os grupos de tests/score.
 #   moj preview [dir] [--lang en|es]      Renderiza o enunciado em HTML. --lang renderiza a tradução.
 #   moj title [dir] [--lang en|es] [<t>]  Mostra ou define o título (o da tradução com --lang).
-#   moj download <id> [arq] [--sha <sha>] Baixa o pacote. --sha baixa a versão do commit.
-#   moj upload <id> [dir|arq] [--force]   Sobe o pacote inteiro.
-#   moj languages <dir> [c,cpp,py,…|all]  Define as linguagens de submissão. Obrigatória em
+#   moj download [<id>] [arq] [--sha <sha>]  Baixa o pacote. --sha baixa a versão do commit.
+#   moj upload [<id>] [dir|arq] [--force] [--overwrite]  Sobe o pacote inteiro. Mesma trava do push.
+#   moj languages [dir] [c,cpp,py,…|all]  Define as linguagens de submissão. Obrigatória em
 #                                         problema de função ou de ban.
 # Idiomas do enunciado: docs/enunciado.md é o português. docs/enunciado.<lang>.md (en, es) é a
 #   tradução; docs/notes/<sample>.<lang>.md a explicação traduzida; docs/solucao.<lang>.md o
@@ -37,25 +46,26 @@
 #   moj interactive <dir> <arbitro> [--score]   Instala o driver de problema interativo.
 #   moj fn <dir> [--langs c,cpp,py,java,rs]     Instala os drivers de submissão de função.
 # Histórico
-#   moj log <id> [-n N] | moj log <id> <sha>    Mostra o histórico git. Com <sha>, mostra o diff.
-#   moj restore <id> <sha>                Restaura a versão como um commit novo.
+#   moj log [<id>] [-n N] | moj log [<id>] <sha>  Mostra o histórico git. Com <sha>, mostra o diff.
+#   moj restore [<id>] <sha>              Restaura a versão como um commit novo.
 # Portão de qualidade
-#   moj validate <id> [--no-wait]         Valida e enfileira a calibração. Não publica.
+#   moj validate [<id>] [--no-wait]       Valida e enfileira a calibração. Não publica.
 #                                         Atenção: cada chamada recalibra. Para consultar, use status/check.
-#   moj public <id> on|off [--yes]        Publica ou despublica.
-#   moj publish <id>                      Publica. O servidor valida e calibra.
-#   moj calibrate <id> [--hosts h1,h2|--all-judges|--per-cpu] | --judges | --all-stale
+#   moj public [<id>] on|off [--yes]      Publica ou despublica.
+#   moj publish [<id>]                    Publica. O servidor valida e calibra.
+#   moj calibrate [<id>] [--hosts h1,h2|--all-judges|--per-cpu] | --judges | --all-stale
 #                                         Calibra nos juízes escolhidos. --judges lista o parque.
 #                                         --all-stale recalibra o lote do painel.
-#   moj calib <id>                        Mostra a calibração por extenso (--json = JSON cru).
-#   moj calib-report <id> [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
-#   moj testrun <id|dir> <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
+#   moj calib [<id>]                      Mostra a calibração por extenso (--json = JSON cru).
+#   moj calib-report [<id>] [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
+#   moj testrun [<id|dir>] <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
 #   moj testrun-status <run>              Consulta um testrun.
 # Orgs e coleções
 #   moj mkdir <org>                       Cria uma org.
 #   moj share <org> <login> | unshare <org> <login>   Adiciona ou remove um membro.
 #   moj org list|create|members|public|rm Gerencia orgs. rm remove só org vazia.
 #   moj collection ls|create|show|add|remove|rename|delete|status   Gerencia coleções.
+#                                         Na pasta do problema: moj collection add "<coleção>".
 #   moj mv <id> <org>                     Move um rascunho para outra org. O id muda.
 #   moj rm <id>                           Remove o problema. Pede o id para confirmar.
 # Manutenção
@@ -336,7 +346,8 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
   jq -n --arg id "$id" --arg r "${id%%#*}" --arg p "${id##*#}" --arg fmt "$efmt" --slurpfile s "$jf" \
     '($s[0] // {}) as $src
      | {id:$id, repo:$r, prob:$p, title:($src.title//""), titles:($src.titles//{}), format:$fmt, collections:($src.collections//[]),
-        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true, docs_rt:true, trans_rt:true}' > "$d/.moj-id"
+        languages:($src.languages//[]), public:($src.public//false), scripts_rt:true, docs_rt:true, trans_rt:true,
+        base_rev:($src.rev//"")}' > "$d/.moj-id"
   rm -rf "$T" "${_t:-}"; }
 
 # conf get/set por chave (bash; chave entre aspas -> [ ] literais)
@@ -360,9 +371,12 @@ cmd_ls(){ need_login; local tab="${1:-mine}" j; j="$(api_get_cached 60 "/problem
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
   jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' <<<"$j" | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <org>   (= moj org create; a org é o <org> do id)"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"org criada: \(.repo) (você é admin)"'; }
-cmd_publish(){ need_login; [[ $# -ge 1 ]] || die "uso: moj publish <id> [--yes]   (= moj public <id> on)"; cmd_public "$1" on "${@:2}"; }
-cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--yes]"
-  local id="$1" onoff="$2" yes=0 a; shift 2; for a in "$@"; do [[ "$a" == --yes || "$a" == -y ]] && yes=1; done
+# <id> OPCIONAL nos comandos de problema: dentro da pasta dele (ou de uma subpasta) vale o do .moj-id,
+# e o nome sem a org usa a org do .moj-id (issue #2). Ver id_arg/resolve_id.
+cmd_publish(){ need_login; id_arg '' "$@"; shift "$IDSHIFT"; cmd_public "$ID" on "$@"; }
+cmd_public(){ need_login; id_arg '^(on|off)$' "$@"; shift "$IDSHIFT"
+  [[ $# -ge 1 && "$1" =~ ^(on|off)$ ]] || die "uso: moj public [<id>] on|off [--yes]"
+  local id="$ID" onoff="$1" yes=0 a; shift; for a in "$@"; do [[ "$a" == --yes || "$a" == -y ]] && yes=1; done
   local v=false; [[ "$onoff" == on ]] && v=true
   # TORNAR PÚBLICO é ação cautelosa: confirma (provas devem ficar privadas). --yes p/ scripts.
   if [[ "$v" == true && "$yes" -eq 0 ]]; then
@@ -376,8 +390,7 @@ cmd_public(){ need_login; [[ $# -ge 2 ]] || die "uso: moj public <id> on|off [--
 # paridade com a "Calibração direcionada" do editor web; o servidor dedupa por host), lote
 # (--all-stale) e a lista de juízes p/ escolher (--judges). Gate do servidor: quem EDITA o problema.
 cmd_calibrate(){ need_login
-  [[ $# -ge 1 ]] || die "uso: moj calibrate <id> [--hosts h1,h2 | --all-judges | --per-cpu] | --judges | --all-stale"
-  if [[ "$1" == --all-stale ]]; then
+  if [[ "${1:-}" == --all-stale ]]; then
     # recalibra o LOTE inteiro do painel (tudo que "precisa recalibrar"); o servidor recomputa a
     # lista autorizada e enfileira com dedup+serialização (lote é seguro por construção)
     api POST "/problems/recalibrate-stale" '{}' | { [[ "$RAW" == 1 ]] && cat || jq -r '
@@ -385,13 +398,14 @@ cmd_calibrate(){ need_login
       ((.queued // [])[] | "  \(.id)  (reqid \(.reqid))")'; }
     return
   fi
-  if [[ "$1" == --judges ]]; then     # os juízes do parque (p/ montar um --hosts)
+  if [[ "${1:-}" == --judges ]]; then     # os juízes do parque (p/ montar um --hosts)
     api GET "/problems/judges" | { [[ "$RAW" == 1 ]] && cat || {
       jq -r '.judges[]? | "  \(.host)\t\(.cpu // "?")\t\(if .online then "online" else "OFFLINE" end)"' \
         | { column -t -s$'\t' 2>/dev/null || cat; }; }; }
     return
   fi
-  local id="$1" mode="" want="" a; shift
+  id_arg '' "$@"; shift "$IDSHIFT"
+  local id="$ID" mode="" want="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in
       --hosts) want="${1:?faltou a lista de --hosts}"; mode=hosts; shift;;
@@ -432,8 +446,8 @@ cmd_calibrate(){ need_login
 # soluções, seções obrigatórias) + gera o índice, e pede calibração ao juiz. O problema segue PRIVADO
 # — publicar é `moj public <id> on`, e aí a ORG precisa permitir. Espera o relatório novo (o campo
 # `at` muda) e o imprime com o mesmo formato do `moj check`.
-cmd_validate(){ need_login; [[ $# -ge 1 ]] || die "uso: moj validate <id> [--no-wait]"
-  local id="$1" wait=1 a before at i; shift
+cmd_validate(){ need_login; id_arg '' "$@"; shift "$IDSHIFT"
+  local id="$ID" wait=1 a before at i
   for a in "$@"; do [[ "$a" == --no-wait || "$a" == -n ]] && wait=0; done
   # pre-check INFORMATIVO nunca pode derrubar o comando (set -e): problema recém-subido pode
   # ainda não estar visível (índice/overlay atrasado) — o GET falha e o validate seguia morrendo
@@ -483,7 +497,7 @@ cmd_status(){ need_login
   api GET "/index/status" | out '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; }
 # QA COMPLETO de um problema: validação (testado em todos os casos) + calibração (TL por juiz +
 # solução good que falhou em TODAS as máquinas) + TL servido/staleness.
-cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="$1" vt ct tt
+cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt
   vt="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null)" || vt='{}'
   ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
   tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
@@ -528,8 +542,8 @@ cmd_check(){ need_login; [[ $# -ge 1 ]] || die "uso: moj check <id>"; local id="
 # CALIBRAÇÃO ESTRUTURADA: o que cada juiz rodou, solução a solução, teste a teste — o campo
 # `sols` do /problems/calib ([{file,lang,category,verdict,tests:[{name,code,time,tl}]}]).
 # P/ integrar com ferramentas externas: `moj --json calib <id>` (JSON cru).
-cmd_calib(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calib <id>"
-  local id="$1" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
+cmd_calib(){ need_login; id_arg '' "$@"
+  local id="$ID" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
   jq -r --argjson now "$EPOCHSECONDS" '"\(.id)  (checksum \((.checksum // "?")[0:8])" +
            (if (.version // "") != "" then ", versão \(.version[0:8])" else "" end) + ")" +
@@ -554,8 +568,8 @@ cmd_calib(){ need_login; [[ $# -ge 1 ]] || die "uso: moj calib <id>"
 }
 # report.html de UMA solução da calibração, por juiz (GET /problems/calib-report).
 cmd_calib_report(){ need_login
-  [[ $# -ge 1 ]] || die "uso: moj calib-report <id> [--host <juiz> --sol <nome>] [-o <out.html>]"
-  local id="$1" host="" name="" out=""; shift
+  id_arg '' "$@"; shift "$IDSHIFT"
+  local id="$ID" host="" name="" out=""
   while [[ $# -gt 0 ]]; do case "$1" in
     --host) host="${2:-}"; shift;; --sol|--name) name="${2:-}"; shift;;
     -o|--out) out="${2:-}"; shift;; *) die "opção desconhecida: $1";; esac; shift; done
@@ -573,14 +587,18 @@ cmd_calib_report(){ need_login
 # calibrado da submissão real — SEM entrar em history/placar de ninguém. Só quem EDITA o
 # problema (o resultado expõe os testes ocultos). Devolve o vetor {name,code,time,tl} por teste.
 cmd_testrun(){ need_login
-  [[ $# -ge 2 ]] || die "uso: moj testrun <id|dir> <arquivo-solução> [--report <out.html>] [--no-wait]"
-  local ref="$1" sol="$2" report="" wait=1; shift 2
+  local pos=() report="" wait=1
   while [[ $# -gt 0 ]]; do case "$1" in
     --report) report="${2:-}"; shift;; --no-wait|-n) wait=0;;
-    *) die "opção desconhecida: $1";; esac; shift; done
+    -*) die "opção desconhecida: $1";; *) pos+=("$1");; esac; shift; done
+  # 1 argumento = a solução (o id vem da pasta do problema); 2 = <id|dir> e a solução
+  local sol id
+  case "${#pos[@]}" in
+    1) sol="${pos[0]}"; id="$(resolve_id)" || exit 1;;
+    2) sol="${pos[1]}"; id="$(resolve_id "${pos[0]}")" || exit 1;;
+    *) die "uso: moj testrun [<id|dir>] <arquivo-solução> [--report <out.html>] [--no-wait]";;
+  esac
   [[ -f "$sol" ]] || die "arquivo não encontrado: $sol"
-  local id="$ref"
-  [[ -f "$ref/.moj-id" ]] && id="$(mid "$ref" id)"    # aceita o dir do clone no lugar do id
   [[ "$id" == *#* ]] || die "id inválido: '$id' (esperado <org>#<prob>, ou o dir de um clone)"
   # corpo por ARQUIVO (fonte grande nunca anda por argv)
   local b64f bodyf resp run
@@ -633,8 +651,9 @@ cmd_board(){ need_login; local j; j="$(api GET "/problems/status")"
     jq -r '(.problems//[]) | sort_by(if .needs_review then 0 elif .needs_recalibration then 1 else 2 end) | .[] | "\(.id)\t\(if .public then "sim" else "não" end)\t\(if .validated=="ok" then "OK" elif .validated=="error" then "REPROV" else "—" end)\t\(if .calibrated then "sim" else "não" end)\t\((.review_reasons//[])|join(","))"' <<<"$j"
   } | { column -t -s$'\t' 2>/dev/null || cat; }
 }
-cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
-  local id="$1" d="${1##*#}"
+cmd_info(){ need_login; id_arg '' "$@"
+  local id="$ID" d="${ID##*#}" r
+  r="$(pkg_root)" && [[ "$(jq -r '.id//""' "$r/.moj-id" 2>/dev/null)" == "$id" ]] && d="$r"
   # cache: se há um CLONE LOCAL, mostra os metadados/contagens dele — sem consultar o servidor.
   if [[ -f "$d/.moj-id" && "$(jq -r '.id//""' "$d/.moj-id" 2>/dev/null)" == "$id" ]]; then
     jq -r '"id: \(.id)\ntítulo: \(.title//.prob)\npúblico: \(.public)  coleções: \((.collections//[])|join(", "))"' "$d/.moj-id"
@@ -643,7 +662,7 @@ cmd_info(){ need_login; [[ $# -ge 1 ]] || die "uso: moj info <id>"
       "$(find "$d/tests/input" -name 'sample*' 2>/dev/null | wc -l)" \
       "$(( $(find "$d/tests/input" -type f 2>/dev/null | wc -l) - $(find "$d/tests/input" -name 'sample*' 2>/dev/null | wc -l) ))" \
       "$(for c in good wrong slow pass upcoming; do n=$(ls "$d/sols/$c" 2>/dev/null | wc -l); ((n)) && printf '%s:%s ' "$c" "$n"; done)"
-    echo "(do clone local ./$d — 'moj status $id' p/ a validação atual do servidor)"; return 0
+    echo "(do clone local $d — 'moj check $id' p/ a validação atual do servidor)"; return 0
   fi
   # sem clone: vai ao servidor — 2 GETs em PARALELO e com cache local (TTL 60s; repete = instantâneo).
   local gt st; gt="$(mktemp)"; st="$(mktemp)"
@@ -678,6 +697,7 @@ cmd_clone(){ need_login; [[ $# -ge 1 ]] || die "uso: moj clone <id> [dir]"
   local sf; sf="$(mktemp)"
   api_get_to_file "/problems/source?id=$(enc "$id")&tests=full" "$sf"
   json_to_pkg "$sf" "$d" "$id"
+  pkg_base_save "$d"   # linha de base: o `moj pull` sabe o que VOCÊ mudou; o push manda o base_rev
   echo "clonado ./$d  (editable: $(jq -r '.editable // false' < "$sf"))"
   rm -f "$sf"; }
 
@@ -741,6 +761,7 @@ cmd_test(){ local d="." run=0 sol="" a
     --*) die "opção desconhecida: $a (uso: moj test [dir] [--run [sol]])";;
     *) if [[ -d "$a" ]]; then d="$a"; elif [[ -f "$a" ]]; then sol="$a"; else die "não achei '$a' (dir do pacote ou arquivo de solução)"; fi;;
   esac; done
+  [[ "$d" == . && ! -f ./.moj-id ]] && { d="$(pkg_root)" || d=.; }   # de uma subpasta: a pasta do problema
   if gate "$d"; then echo "ok: pré-voo passou (enunciado, exemplos e solução good presentes)."
   else [[ $run -eq 1 ]] || return 1; echo "  (seguindo p/ o --run mesmo assim)"; fi
   [[ $run -eq 1 ]] || return 0
@@ -845,9 +866,14 @@ cmd_interactive(){ [[ $# -ge 2 ]] || die "uso: moj interactive <dir> <arbitro.cp
   local mt; mt="$(mojtools_dir)"; local d="$1" arb="$2"; shift 2
   bash "$mt/interactive/install-interactive.sh" "$d" "$arb" "$@"
   echo "dica: 'moj push $d' já envia scripts/ (round-trip)."; }
+# moj push [dir] [--force] [--overwrite] — envia a pasta. A pasta é achada como o git acha o .git (a
+# atual ou uma acima com .moj-id). TRAVA: manda o base_rev do .moj-id; se o problema mudou no servidor
+# depois do seu último clone/pull/push, o servidor recusa (409) e nada é gravado. --overwrite envia por
+# cima assim mesmo. (--force continua sendo só "pule o pré-voo e o título" — não passa pela trava.)
 cmd_push(){ need_login
-  local force=0 d="." a; for a in "$@"; do case "$a" in --force) force=1;; --*) die "opção desconhecida: $a (uso: moj push [dir] [--force])";; *) d="$a";; esac; done
-  [[ -f "$d/.moj-id" ]] || die "rode dentro de um problema (faltou .moj-id; use 'moj new'/'moj clone')."
+  local force=0 ow=false d="" a; for a in "$@"; do case "$a" in --force) force=1;; --overwrite) ow=true;; --*) die "opção desconhecida: $a (uso: moj push [dir] [--force] [--overwrite])";; *) d="$a";; esac; done
+  d="$(pkg_root "${d:-.}")" || die "rode dentro da pasta de um problema (a que tem o .moj-id) ou passe a pasta. Para começar: 'moj new' ou 'moj clone'."
+  local base; base="$(jq -r '.base_rev // ""' "$d/.moj-id")"
   local id repo prob; id="$(jq -r .id "$d/.moj-id")"; repo="$(jq -r .repo "$d/.moj-id")"; prob="$(jq -r .prob "$d/.moj-id")"
   # id/repo/prob são a IDENTIDADE do problema no servidor — editar à mão quebra o push de um jeito
   # confuso ("Problema não existe") e, se id E prob mudassem juntos, o push CRIARIA UM DUPLICADO em
@@ -881,10 +907,14 @@ cmd_push(){ need_login
   # SERIALIZAR O PACOTE INTEIRO (~100 MB num pacote grande) só p/ jogar fora — dobrava o custo do push
   # e, quando ELE estourava o tempo-limite, o push caía no ramo `create` e tomava 409.
   # E o POST vai FORA DE PIPE: no pipe, o `die` matava só o subshell e o push falhava com rc=0.
+  # a TRAVA vai no corpo: base_rev (o que você tinha) ou force (--overwrite). Sem base_rev (pasta de
+  # antes desta versão) o servidor se comporta como sempre: grava por cima.
+  local lockf='. + (if $ow then {force:true} elif $b != "" then {base_rev:$b} else {} end)'
   if [[ "$(http_code GET "/problems/get?id=$(enc "$id")")" == 2* ]]; then
-    jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
-    resp="$(api_post_file "/problems/edit" "$bf2")" || { rm -f "$bf" "$bf2"; exit 1; }
+    jq -c --arg id "$id" --arg b "$base" --argjson ow "$ow" ". + {id:\$id} | $lockf" "$bf" > "$bf2"
+    resp="$(_post_rev "/problems/edit" "$bf2" "moj push --overwrite")" || { rm -f "$bf" "$bf2"; exit 1; }
     jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
+    _base_after_send "$d" "$resp"
   else
     api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
     jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' "$bf" > "$bf2"
@@ -892,13 +922,14 @@ cmd_push(){ need_login
     # API_LAST_CODE/API_LAST_BODY não chegariam ao elif/else abaixo
     local rf; rf="$(mktemp)"
     if API_SOFT=1 api_post_file "/problems/create" "$bf2" > "$rf" 2>/dev/null; then
-      jq -r '"enviado (novo): \(.id)  sha \(.sha)"' < "$rf"; rm -f "$rf"
+      jq -r '"enviado (novo): \(.id)  sha \(.sha)"' < "$rf"; _base_after_send "$d" "$(cat "$rf")"; rm -f "$rf"
     elif [[ "${API_LAST_CODE:-}" == 409 ]]; then
       rm -f "$rf"
       # 409 "já existe" (índice ainda não enxergou o problema): reenvia como EDIT em vez de morrer
-      jq -c --arg id "$id" '. + {id:$id}' "$bf" > "$bf2"
-      resp="$(api_post_file "/problems/edit" "$bf2")" || { rm -f "$bf" "$bf2"; exit 1; }
+      jq -c --arg id "$id" --arg b "$base" --argjson ow "$ow" ". + {id:\$id} | $lockf" "$bf" > "$bf2"
+      resp="$(_post_rev "/problems/edit" "$bf2" "moj push --overwrite")" || { rm -f "$bf" "$bf2"; exit 1; }
       jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
+      _base_after_send "$d" "$resp"
     else
       # erro REAL do create (400/403/…): mostrar a mensagem do SERVIDOR. O fallback cego p/
       # o edit trocava "Nome de problema inválido" por um "Problema não existe (404)" sem pé
@@ -916,8 +947,8 @@ cmd_rm(){ need_login; [[ $# -ge 1 ]] || die "uso: moj rm <id>   (remove o proble
   read -rp "Para confirmar, repita o id ($id): " c </dev/tty || true
   [[ "$c" == "$id" ]] || die "confirmação não bateu — nada foi removido."
   api POST "/problems/delete" "$(jq -n --arg id "$id" '{id:$id, confirm:$id}')" | jq -r '"removido: \(.id)"'; }
-cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arquivo] [--sha <sha>]"
-  local id="$1"; shift
+cmd_download(){ need_login; id_arg '\.(tar\.gz|tgz|tar)$' "$@"; shift "$IDSHIFT"
+  local id="$ID"
   local out="" sha="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in --sha) sha="${1:?}"; shift;; -*) die "opção desconhecida: $a";; *) out="$a";; esac
@@ -933,8 +964,8 @@ cmd_download(){ need_login; [[ $# -ge 1 ]] || die "uso: moj download <id> [arqui
   echo "baixado: $out"; }
 
 # histórico git do problema: lista (sha, data, autor, assunto, ±stats) ou o diff -p de um commit
-cmd_log(){ need_login; [[ $# -ge 1 ]] || die "uso: moj log <id> [-n N] | moj log <id> <sha>"
-  local id="$1"; shift
+cmd_log(){ need_login; id_arg '^[0-9a-f]{7,40}$' "$@"; shift "$IDSHIFT"
+  local id="$ID"
   local n=30 sha="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
     case "$a" in -n) n="${1:?}"; shift;; -*) die "opção desconhecida: $a";; *) sha="$a";; esac
@@ -954,8 +985,9 @@ cmd_log(){ need_login; [[ $# -ge 1 ]] || die "uso: moj log <id> [-n N] | moj log
     | column -t -s$'\t'; }; }
 
 # restaura versão antiga como um COMMIT NOVO (história preservada; meta/público intactos)
-cmd_restore(){ need_login; [[ $# -ge 2 ]] || die "uso: moj restore <id> <sha>   (veja os sha com 'moj log <id>')"
-  local id="$1" sha="$2" c=""
+cmd_restore(){ need_login; id_arg '^[0-9a-f]{7,40}$' "$@"; shift "$IDSHIFT"
+  [[ $# -ge 1 ]] || die "uso: moj restore [<id>] <sha>   (veja os sha com 'moj log')"
+  local id="$ID" sha="$1" c=""
   [[ "$sha" =~ ^[0-9a-f]{7,40}$ ]] || die "sha inválido (hex 7-40)"
   echo "⚠ Isto restaura '$id' ao estado do commit $sha como um commit NOVO."
   echo "  (a história não é reescrita; público/coleções atuais são preservados)"
@@ -976,10 +1008,23 @@ _tar_meta_json(){ local a="$1" d m; d="$(mktemp -d)"
   { [[ -n "$m" ]] && cat "$m" 2>/dev/null; } || echo '{}'
   rm -rf "$d"; }
 cmd_upload(){ need_login
-  local force=0 args=() a
-  for a in "$@"; do case "$a" in --force) force=1;; --*) die "opção desconhecida: $a";; *) args+=("$a");; esac; done
-  [[ ${#args[@]} -ge 1 ]] || die "uso: moj upload <id> [dir|arquivo.(tar.gz|tar.bz2|tar.zst|zip)] [--force]   (dir/omitido = empacota sozinho)"
-  local id="${args[0]}" src="${args[1]:-.}" tarball tmptar=""
+  local force=0 ow=false args=() a
+  for a in "$@"; do case "$a" in --force) force=1;; --overwrite) ow=true;; --*) die "opção desconhecida: $a";; *) args+=("$a");; esac; done
+  # sem <id>: o da pasta do problema. Um argumento só que EXISTE no disco é a origem (pasta ou arquivo)
+  local id src r=""; r="$(pkg_root)" || r=""
+  case "${#args[@]}" in
+    0) id="$(resolve_id)" || exit 1; src="$r";;
+    1) if [[ -f "${args[0]}/.moj-id" ]]; then src="${args[0]}"; id="$(resolve_id "$src")" || exit 1
+       elif [[ -e "${args[0]}" ]]; then src="${args[0]}"; id="$(resolve_id)" || exit 1
+       else id="$(resolve_id "${args[0]}")" || exit 1; src="${r:-.}"; fi;;
+    2) id="$(resolve_id "${args[0]}")" || exit 1; src="${args[1]}";;
+    *) die "uso: moj upload [<id>] [dir|arquivo.(tar.gz|tar.bz2|tar.zst|zip)] [--force] [--overwrite]   (dir/omitido = empacota sozinho)";;
+  esac
+  local tarball tmptar="" base="" srcpkg=""
+  # a TRAVA só vale quando a origem é a pasta clonada DESTE problema (é ela que tem a linha de base)
+  if [[ -d "$src" && -f "$src/.moj-id" && "$(jq -r '.id // ""' "$src/.moj-id" 2>/dev/null)" == "$id" ]]; then
+    srcpkg="$src"; base="$(jq -r '.base_rev // ""' "$src/.moj-id")"
+  fi
   if [[ -d "$src" ]]; then
     [[ -f "$src/conf" || -d "$src/tests" ]] || die "'$src' não parece um pacote MOJ (sem conf/tests)"
     tmptar="$(mktemp)"; tarball="$tmptar"
@@ -987,7 +1032,7 @@ cmd_upload(){ need_login
     # .moj-meta.json sintetizado anexado por ÚLTIMO ao tar (membro posterior vence na extração
     # do servidor). Sem isto, upload de um pacote clonado zerava a whitelist de linguagens.
     local tx metad=""
-    tx=(--exclude='./.git' --exclude='./.moj-id' \
+    tx=(--exclude='./.git' --exclude='./.moj-id' --exclude='./.moj-base' --exclude='./.moj-base.tmp' \
         --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.pre-normalizacao*')
     if [[ -f "$src/.moj-id" ]]; then
       local basemeta='{}'
@@ -1020,11 +1065,14 @@ cmd_upload(){ need_login
   # muda; upload nem publica nem despublica). O aviso antigo de "DESPUBLICA" era de antes do
   # servidor proteger o meta (cdmoj 7bbe17a) e ficou obsoleto — removido.
   local bf b64; bf="$(mktemp)"; b64="$(mktemp)"; _b64enc "$tarball" > "$b64"
-  jq -n --arg id "$id" --rawfile t "$b64" '{id:$id,tar_b64:$t}' > "$bf"
-  api_post_file "/problems/upload" "$bf" | jq -r '"enviado: \(.id)  sha \(.sha)"'
+  jq -n --arg id "$id" --rawfile t "$b64" --arg b "$base" --argjson ow "$ow" \
+    '{id:$id,tar_b64:$t} + (if $ow then {force:true} elif $b != "" then {base_rev:$b} else {} end)' > "$bf"
+  local resp; resp="$(_post_rev "/problems/upload" "$bf" "moj upload --overwrite")" || { rm -f "$bf" "$b64" ${tmptar:+"$tmptar"}; exit 1; }
+  jq -r '"enviado: \(.id)  sha \(.sha)"' <<<"$resp"
+  [[ -n "$srcpkg" ]] && _base_after_send "$srcpkg" "$resp"
   rm -f "$bf" "$b64" ${tmptar:+"$tmptar"}; }
-cmd_export(){ need_login; [[ $# -ge 1 ]] || die "uso: moj export <id> [arquivo.tar.gz]   (pacote ICPC/Kattis)"
-  local id="$1" out="${2:-${1##*#}.icpc.tar.gz}"
+cmd_export(){ need_login; id_arg '\.(tar\.gz|tgz)$' "$@"; shift "$IDSHIFT"
+  local id="$ID" out="${1:-${ID##*#}.icpc.tar.gz}"
   api_get_to_file "/problems/export?id=$(enc "$id")" "$out"; echo "exportado (ICPC/Kattis): $out"; }
 cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz|zip)> <pasta> [prob]   (ICPC/Kattis -> MOJ)"
   [[ -f "$1" ]] || die "arquivo não encontrado: $1"
@@ -1033,6 +1081,7 @@ cmd_import(){ need_login; [[ $# -ge 2 ]] || die "uso: moj import <pacote.(tar.gz
   api_post_file "/problems/import" "$bf" | jq -r '"importado: \(.id)  sha \(.sha)"'; rm -f "$bf" "$b64"; }
 cmd_preview(){ need_login; local d="." lang=pt
   while [[ $# -gt 0 ]]; do case "$1" in --lang) lang="${2:-}"; shift 2;; *) d="$1"; shift;; esac; done
+  [[ "$d" == . && ! -f ./.moj-id ]] && { d="$(pkg_root)" || d=.; }   # de uma subpasta: a pasta do problema
   [[ -f "$d/.moj-id" || -d "$d/docs" ]] || die "rode dentro de um problema."
   [[ "$lang" =~ ^(pt|en|es)$ ]] || die "--lang aceita pt, en ou es"
   [[ "$lang" == pt || -f "$d/docs/enunciado.$lang.md" ]] || die "sem docs/enunciado.$lang.md — crie a tradução antes (moj edit → t)."
@@ -1075,6 +1124,22 @@ _retag_wait(){ local jid="$1" j dn tt fl fin extra deadline=$((SECONDS+600))
   done
   printf '\n  (ainda rodando — acompanhe com: moj collection status %s)\n' "$jid"; return 0; }
 
+# _coll_sync_local <id> <rev-antes> <coleções-novas> — `moj collection add/remove` de dentro da pasta do
+# problema: coleção muda o rev do servidor (o push manda as coleções), então a pasta acompanha — senão o
+# próximo push seria recusado pela sua própria mudança. Só quando a linha de base da pasta ERA o servidor
+# de antes da operação; pasta atrás do servidor ganha a dica do pull.
+_coll_sync_local(){ local id="$1" pre="$2" cols="$3" r base had now
+  r="$(pkg_root)" || return 0
+  [[ "$(jq -r '.id // ""' "$r/.moj-id" 2>/dev/null)" == "$id" ]] || return 0
+  base="$(jq -r '.base_rev // ""' "$r/.moj-id")"
+  if [[ -z "$pre" || "$base" != "$pre" ]]; then
+    echo "  (a pasta $r está atrás do servidor: rode 'moj pull' para trazer esta e as outras mudanças)"; return 0
+  fi
+  had="$(pkg_changes "$r")"
+  now="$(api GET "/problems/get?id=$(enc "$id")" | jq -r '.rev // ""')" || return 0
+  mid_set "$r" --argjson c "$cols" --arg v "$now" '.collections=$c | .base_rev=$v'
+  [[ -n "$had" ]] || pkg_base_save "$r"      # sem mudança sua na pasta: ela é a versão do servidor de novo
+  return 0; }
 # COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
 # pode ter ESPAÇOS. Marcar um problema numa coleção exige que ela EXISTA (crie antes).
 cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
@@ -1084,12 +1149,18 @@ cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
       api POST "/problems/collection-create" "$(jq -n --arg n "$*" '{name:$n}')" | jq -r '"coleção criada: \(.name) (dono \(.owner))"';;
     show|browse) [[ $# -ge 1 ]] || die "uso: moj collection show \"<nome>\""
       api GET "/problems/collection?name=$(enc "$*")" | jq -r '.problems[]? | "  \(.id)\t\(if .public then "público" else "rascunho" end)\t\(.title // .prob)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
-    add) [[ $# -ge 2 ]] || die "uso: moj collection add <id> \"<coleção>\""
-      local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")&tests=meta" | jq -c '.collections // []')"
-      api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:(($c+[$n])|unique)}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
-    remove|rm) [[ $# -ge 2 ]] || die "uso: moj collection remove <id> \"<coleção>\""
-      local id="$1"; shift; local cur; cur="$(api GET "/problems/source?id=$(enc "$id")&tests=meta" | jq -c '.collections // []')"
-      api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" '{id:$id, collections:($c|map(select(.!=$n)))}')" | jq -r '"\(.id): coleções = \(.collections|join(", "))"';;
+    add|remove|rm)
+      # o nome da coleção pode ter espaços (e vir sem aspas): o <id> só é o 1º argumento quando tem
+      # '#' ou é uma pasta clonada — senão é o da pasta do problema e TUDO é o nome da coleção
+      local id; if [[ $# -ge 2 && ( "$1" == *#* || -f "$1/.moj-id" ) ]]; then id="$(resolve_id "$1")" || exit 1; shift
+        else id="$(resolve_id)" || exit 1; fi
+      [[ $# -ge 1 ]] || die "uso: moj collection $sub [<org>#<prob>] \"<coleção>\""
+      local op='(($c+[$n])|unique)'; [[ "$sub" == add ]] || op='($c|map(select(.!=$n)))'
+      local src cur pre; src="$(api GET "/problems/source?id=$(enc "$id")&tests=meta")"
+      cur="$(jq -c '.collections // []' <<<"$src")"; pre="$(jq -r '.rev // ""' <<<"$src")"
+      local resp; resp="$(api POST "/problems/set-collections" "$(jq -n --arg id "$id" --argjson c "${cur:-[]}" --arg n "$*" "{id:\$id, collections:$op}")")" || exit 1
+      jq -r '"\(.id): coleções = \(.collections|join(", "))"' <<<"$resp"
+      _coll_sync_local "$id" "$pre" "$(jq -c '.collections // []' <<<"$resp")";;
     rename) local nowait=0 ra=() a2
       for a2 in "$@"; do case "$a2" in --no-wait) nowait=1;; *) ra+=("$a2");; esac; done
       [[ ${#ra[@]} -ge 2 ]] || die "uso: moj collection rename \"<nome>\" \"<novo>\" [--no-wait]"
@@ -1114,13 +1185,15 @@ cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
 # languages = WHITELIST de linguagens de SUBMISSÃO do problema ([]/ausente = todas as padrão).
 # Vive no .moj-id local e viaja no `moj push` (campo) E no `moj upload` (meta sintetizado).
 # Essencial em problema de função/ban: sem whitelist, trocar de linguagem burla o driver.
-cmd_languages(){ local d="${1:-.}" list="${2:-}"
-  [[ -f "$d/.moj-id" ]] || die "'$d' não é um pacote clonado (sem .moj-id) — use moj clone/new antes."
+cmd_languages(){ local d="" list=""
+  if [[ $# -ge 1 && -f "$1/.moj-id" ]]; then d="$1"; list="${2:-}"
+  elif [[ $# -ge 1 && -d "$1" ]]; then die "'$1' não é um pacote clonado (sem .moj-id) — use moj clone/new antes."
+  else list="${1:-}"; d="$(pkg_root)" || die "rode dentro da pasta de um problema (a que tem o .moj-id) ou passe a pasta: moj languages <dir> [lista]"; fi
   if [[ -z "$list" ]]; then
     local cur; cur="$(jq -r '(.languages // []) | join(",")' "$d/.moj-id" 2>/dev/null)"
     if [[ -n "$cur" ]]; then echo "languages: $cur"
     else echo "languages: (todas as padrão — sem whitelist)"; fi
-    echo "  setar:  moj languages $d c,cpp,py[,java,rs,…]     liberar todas:  moj languages $d all"
+    echo "  setar:  moj languages c,cpp,py[,java,rs,…]     liberar todas:  moj languages all   (fora da pasta: moj languages <dir> …)"
     return 0
   fi
   if [[ "$list" == all || "$list" == todas ]]; then
@@ -1134,6 +1207,213 @@ cmd_languages(){ local d="${1:-.}" list="${2:-}"
 # ---- editor interativo (como os campos da página) -----------------------------------------
 mid(){ jq -r ".$2 // \"\"" "$1/.moj-id" 2>/dev/null; }                 # campo do .moj-id
 mid_set(){ local d="$1"; shift; local t; t="$(mktemp)"; jq "$@" "$d/.moj-id" > "$t" && mv -f "$t" "$d/.moj-id"; }
+# ---- a PASTA do problema e o id implícito (issue #2: "a org já está no .moj-id") -----------------
+# pkg_root [dir] -> caminho absoluto da pasta do problema: a própria ou a 1ª ACIMA com .moj-id (como o
+# git acha o .git) — `moj push` de dentro de tests/ também acha o pacote.
+pkg_root(){ local d; d="$(cd "${1:-.}" 2>/dev/null && pwd -P)" || return 1
+  while :; do
+    [[ -f "$d/.moj-id" ]] && { printf '%s' "$d"; return 0; }
+    [[ "$d" == / || -z "$d" ]] && return 1
+    d="$(dirname "$d")"
+  done; }
+# resolve_id [arg] -> <org>#<prob>. Vazio = o da pasta do problema; com '#' = ele mesmo; pasta clonada = o
+# dela; nome SEM a org = <org da pasta atual>#nome. ⚠ Use `x="$(resolve_id …)"` em comando SEPARADO do
+# `local`: com `local x="$(…)"` o die do subshell não derruba o comando.
+resolve_id(){ local a="${1:-}" r
+  if [[ -z "$a" ]]; then
+    r="$(pkg_root)" || die "falta o <id>: rode dentro da pasta de um problema (a que tem o .moj-id) ou passe <org>#<prob>."
+    jq -r '.id // empty' "$r/.moj-id"; return 0
+  fi
+  if [[ "$a" == *#* ]]; then printf '%s' "$a"; return 0; fi
+  if [[ -f "$a/.moj-id" ]]; then jq -r '.id // empty' "$a/.moj-id"; return 0; fi
+  r="$(pkg_root)" || die "'$a' não diz a org: use <org>#$a (ou rode dentro da pasta de um problema, que dá a org)."
+  printf '%s#%s' "$(jq -r '.repo // empty' "$r/.moj-id")" "$a"
+}
+# id_arg <regex-do-que-NÃO-é-id> "$@" -> define ID e IDSHIFT (1 = o 1º argumento ERA o id; o chamador faz
+# o shift). O id é IMPLÍCITO (vem da pasta) quando não há argumento, quando o 1º é uma opção (-…) ou quando
+# ele casa a regex E estamos numa pasta de problema (ex.: `moj public on`, `moj restore <sha>`).
+id_arg(){ local free="$1"; shift; IDSHIFT=0
+  if [[ $# -eq 0 || "$1" == -* ]] || { [[ -n "$free" && "$1" =~ $free ]] && pkg_root >/dev/null; }; then
+    ID="$(resolve_id)" || exit 1
+  else ID="$(resolve_id "$1")" || exit 1; IDSHIFT=1; fi
+  [[ "$ID" == *#* ]] || die "id inválido: '$ID' (esperado <org>#<prob>)"
+}
+
+# ---- linha de base local: o que o servidor tinha no último clone/pull/push --------------------------
+# pkg_files <dir> -> os arquivos do PACOTE (relativos, ordenados): exatamente o que o pkg_to_json lê e
+# manda. Arquivo seu que não é do pacote (tests/gera.py, docs/rascunho.txt) fica fora — o pull não mexe
+# nele, e ele não conta como "alteração local".
+pkg_files(){
+  ( cd "$1" 2>/dev/null || exit 0
+    shopt -s nullglob
+    local f c
+    for f in docs/enunciado.md docs/enunciado.org docs/enunciado.tex enunciado.md docs/solucao.md \
+             docs/sample-notes.json author tags conf tests/score; do [[ -f "$f" || -L "$f" ]] && printf '%s\n' "$f"; done
+    for f in docs/enunciado.*.md docs/solucao.*.md docs/notes/*.md; do [[ -f "$f" ]] && printf '%s\n' "$f"; done
+    for f in docs/*; do case "${f##*.}" in png|jpg|jpeg|gif|svg|webp|PNG|JPG|JPEG|GIF|SVG|WEBP) [[ -f "$f" ]] && printf '%s\n' "$f";; esac; done
+    for f in tests/input/*; do [[ -f "$f" ]] || continue; printf '%s\n' "$f"; [[ -f "tests/output/${f##*/}" ]] && printf '%s\n' "tests/output/${f##*/}"; done
+    for c in good slow wrong pass upcoming; do for f in "sols/$c"/*; do [[ -f "$f" ]] && printf '%s\n' "$f"; done; done
+    if [[ -d scripts ]]; then find scripts \( -type f -o -type l \) -print 2>/dev/null; fi
+  ) | LC_ALL=C sort -u
+}
+# pkg_manifest <dir> -> "hash<TAB>caminho" de cada arquivo do pacote + uma linha com os campos de AUTORIA
+# do .moj-id (título, traduções do título, linguagens, coleções — o push manda os quatro)
+pkg_manifest(){ local d="$1" l f z
+  l="$(pkg_files "$d")"; z="$(mktemp)"
+  { if [[ -n "$l" ]]; then
+      # symlink (scripts/<lang> -> c) entra pelo ALVO: o md5 de um link p/ diretório falharia calado
+      ( cd "$d" && while IFS= read -r f; do
+          if [[ -L "$f" ]]; then printf '%s\t%s\n' "$(_hash "link:$(readlink "$f")")" "$f"; else printf '%s\0' "$f" >> "$z"; fi
+        done <<<"$l" )
+      [[ -s "$z" ]] && ( cd "$d" && _hashfiles < "$z" )
+    fi
+    printf '%s\t%s\n' "$(_hash "$(jq -cS '{title:(.title//""), titles:(.titles//{}), languages:(.languages//[]), collections:(.collections//[])}' "$d/.moj-id" 2>/dev/null)")" '.moj-id'
+  } | LC_ALL=C sort -t$'\t' -k2
+  rm -f "$z"
+}
+# pkg_base_save <dir> — grava a linha de base (.moj-base; oculto, só do cliente, não sobe)
+pkg_base_save(){ pkg_manifest "$1" > "$1/.moj-base.tmp" && mv -f "$1/.moj-base.tmp" "$1/.moj-base"; }
+# pkg_changes <dir> -> "M|+|- caminho" do que mudou NA PASTA desde a linha de base (vazio = nada).
+# Pasta clonada antes desta versão (sem .moj-base) -> "? …": não dá p/ saber, e quem chama trata como mudança.
+pkg_changes(){ local d="$1"
+  [[ -f "$d/.moj-base" ]] || { echo "? (pasta sem linha de base: clonada antes do 'moj pull' existir)"; return 0; }
+  pkg_manifest "$d" | awk -F'\t' -v B="$d/.moj-base" '
+    BEGIN { while ((getline l < B) > 0) { n = split(l, a, "\t"); if (n >= 2) b[a[2]] = a[1] } }
+    { c[$2] = $1 }
+    END { for (p in c) { if (!(p in b)) print "+ " p; else if (b[p] != c[p]) print "M " p }
+          for (p in b) if (!(p in c)) print "- " p }' | LC_ALL=C sort -k2
+}
+# pkg_diff_manifests <antes> <depois> -> as mesmas linhas "M|+|- caminho" entre dois manifestos (arquivos)
+pkg_diff_manifests(){
+  awk -F'\t' -v B="$1" '
+    BEGIN { while ((getline l < B) > 0) { n = split(l, a, "\t"); if (n >= 2) b[a[2]] = a[1] } }
+    { c[$2] = $1 }
+    END { for (p in c) { if (!(p in b)) print "+ " p; else if (b[p] != c[p]) print "M " p }
+          for (p in b) if (!(p in c)) print "- " p }' "$2" | LC_ALL=C sort -k2
+}
+# _chg_print <linhas "M|+|-|? caminho"> — a lista de mudanças em português (a linha .moj-id = os campos
+# de autoria do .moj-id: título, títulos traduzidos, linguagens, coleções)
+_chg_print(){ local l k p
+  while IFS= read -r l; do [[ -n "$l" ]] || continue
+    k="${l%% *}"; p="${l#* }"
+    [[ "$p" == .moj-id ]] && p="título/linguagens/coleções (.moj-id)"
+    case "$k" in M) echo "    alterado: $p";; +) echo "    novo:     $p";; -) echo "    removido: $p";; *) echo "    $p";; esac
+  done <<<"$1"; return 0; }
+# _stale_die <corpo-do-409> <comando-que-envia-por-cima> — o 409 stale_rev da API (o problema mudou no
+# servidor depois da sua linha de base) explicado: quem, quando e as três saídas
+_stale_die(){ local b="$1" ow="$2" who when
+  who="$(jq -r '.error.changed_by // ""' <<<"$b" 2>/dev/null || true)"
+  when="$(jq -r 'if (.error.changed_at // 0) > 0 then (.error.changed_at | strflocaltime("%d/%m/%Y %H:%M")) else "" end' <<<"$b" 2>/dev/null || true)"
+  die "o problema mudou no servidor depois do seu último clone/pull/push${who:+ (por $who}${when:+ em $when}${who:+)}.
+  Nada foi enviado. Escolha uma saída:
+    moj pull            traz a versão do servidor (recusa se a pasta tem mudanças suas)
+    moj pull --force    traz a versão do servidor e guarda a sua pasta numa cópia ao lado
+    $ow   envia a sua versão por cima da do servidor"; }
+# _post_rev <rota> <corpo> <comando-por-cima> — POST de edit/upload com a trava de revisão. 409 stale_rev
+# vira a explicação acima; outro erro, a mensagem do servidor. Sucesso: o corpo no stdout.
+# ⚠ Chame SEM $(…) em volta do api_post_file (API_LAST_* morreriam no subshell) — aqui a resposta vai
+# p/ arquivo; o chamador pode usar $(_post_rev …) porque o die sai com rc 1 e ele testa o rc.
+_post_rev(){ local p="$1" f="$2" ow="$3" rf rc=0
+  rf="$(mktemp)"
+  API_SOFT=1 api_post_file "$p" "$f" > "$rf" 2>/dev/null || rc=$?
+  if (( rc != 0 )); then
+    rm -f "$rf"
+    if [[ "${API_LAST_CODE:-}" == 409 && "$(jq -r '.error.code // ""' <<<"${API_LAST_BODY:-}" 2>/dev/null || true)" == stale_rev ]]; then
+      _stale_die "${API_LAST_BODY:-}" "$ow"
+    fi
+    API_SOFT=0 _api_fail "${API_LAST_CODE:-}" "${API_LAST_BODY:-}"; return 1
+  fi
+  cat "$rf"; rm -f "$rf"; }
+# _base_after_send <dir> <resposta> — depois de um push/upload aceito, a pasta É a versão do servidor:
+# grava o rev novo no .moj-id e refaz o .moj-base (servidor sem `rev` = base_rev vazio, sem trava)
+_base_after_send(){ local d="$1" r
+  r="$(jq -r '.rev // ""' <<<"$2" 2>/dev/null || true)"
+  mid_set "$d" --arg r "$r" '.base_rev=$r'
+  pkg_base_save "$d"; }
+# _pkg_swap <novo> <pasta> — troca os arquivos DO PACOTE da pasta pelos do pacote novo: some o que não
+# existe mais, entra ou é atualizado o resto. Arquivo que não é do pacote (gerador, rascunho) fica.
+_pkg_swap(){ local src="$1" dst="$2" f
+  while IFS= read -r f; do [[ -n "$f" ]] || continue
+    [[ -e "$src/$f" || -L "$src/$f" ]] || rm -f "$dst/$f" 2>/dev/null || true
+  done < <(pkg_files "$dst")
+  while IFS= read -r f; do [[ -n "$f" ]] || continue
+    mkdir -p "$dst/$(dirname "$f")"; rm -f "$dst/$f" 2>/dev/null || true
+    if [[ -L "$src/$f" ]]; then ln -s "$(readlink "$src/$f")" "$dst/$f"; else cp -p "$src/$f" "$dst/$f"; fi
+  done < <(pkg_files "$src")
+  # pasta que esvaziou (docs/notes, scripts/<lang>) sai também
+  find "$dst/scripts" "$dst/docs/notes" -depth -type d -empty -exec rmdir {} \; 2>/dev/null || true
+  cp "$src/.moj-id" "$dst/.moj-id"; }
+# moj pull [dir] [--force] — traz p/ a pasta o que mudou no servidor (editor web, outro autor) desde o
+# último clone/pull/push. A linha de base (.moj-id base_rev + .moj-base) separa o que é SEU do que é
+# do servidor: mudança local não enviada => RECUSA (a pasta não é sobrescrita sem você pedir);
+# --force => guarda a pasta inteira em <pasta>.local-AAAAMMDD-HHMMSS e traz a do servidor.
+# Só os arquivos DO PACOTE são trocados (o conjunto do pkg_files).
+cmd_pull(){ need_login
+  local force=0 d="" a
+  for a in "$@"; do case "$a" in
+    --force|-f) force=1;;
+    -*) die "opção desconhecida: $a (uso: moj pull [dir] [--force])";;
+    *) [[ -z "$d" ]] || die "uso: moj pull [dir] [--force]"; d="$a";;
+  esac; done
+  local root; root="$(pkg_root "${d:-.}")" \
+    || die "rode dentro da pasta de um problema (a que tem o .moj-id) ou passe a pasta. Para baixar pela primeira vez: moj clone <org>#<prob>"
+  local id base; id="$(jq -r '.id // ""' "$root/.moj-id")"; base="$(jq -r '.base_rev // ""' "$root/.moj-id")"
+  [[ "$id" == *#* ]] || die "o .moj-id de $root não tem um id válido"
+  local chg nobase=0; chg="$(pkg_changes "$root")"; [[ -f "$root/.moj-base" ]] || nobase=1
+  local rel="$root"; [[ "$root" == "$PWD" ]] && rel="."
+  if (( ! nobase )); then
+    # o servidor mudou? /problems/get é barato: o pacote só é baixado se precisar
+    local cur; cur="$(api GET "/problems/get?id=$(enc "$id")" | jq -r '.rev // ""')"
+    if [[ -n "$cur" && "$cur" == "$base" && "$force" != 1 ]]; then
+      if [[ -z "$chg" ]]; then echo "já está atualizado: $id"; return 0; fi
+      echo "o servidor não mudou desde o seu último clone/pull/push. A pasta tem mudanças suas:"
+      _chg_print "$chg"
+      echo "  Envie com: moj push.  Para descartá-las e voltar à versão do servidor: moj pull --force"
+      return 0
+    fi
+    if [[ -n "$chg" && "$force" != 1 ]]; then
+      echo "a pasta tem mudanças que ainda não foram enviadas:" >&2; _chg_print "$chg" >&2
+      die "nada foi trocado. O servidor também mudou desde o seu último clone/pull/push. Escolha uma saída:
+    moj pull --force      traz a versão do servidor e guarda a sua pasta em $rel.local-AAAAMMDD-HHMMSS
+    moj push --overwrite  envia a sua versão por cima da do servidor"
+    fi
+  fi
+  local T; T="$(mktemp -d)"
+  api_get_to_file "/problems/source?id=$(enc "$id")&tests=full" "$T/src.json"
+  json_to_pkg "$T/src.json" "$T/p" "$id"
+  local newrev; newrev="$(jq -r '.rev // ""' "$T/src.json")"
+  pkg_manifest "$T/p" > "$T/new.man"; pkg_manifest "$root" > "$T/cur.man"
+  local diff; diff="$(pkg_diff_manifests "$T/cur.man" "$T/new.man")"
+  if [[ -z "$diff" ]]; then     # a pasta já é a versão do servidor: só grava a linha de base
+    mid_set "$root" --arg r "$newrev" --argjson p "$(jq '.public // false' "$T/src.json")" '.base_rev=$r | .public=$p'
+    cp "$T/new.man" "$root/.moj-base"; rm -rf "$T"
+    echo "já está atualizado: $id$( ((nobase)) && echo '  (linha de base gravada: da próxima vez o pull sabe o que é seu)')"
+    return 0
+  fi
+  if (( nobase && ! force )); then
+    rm -rf "$T"
+    echo "a pasta e o servidor são diferentes:" >&2
+    awk '{ k = $1; sub(/^[^ ]+ /, ""); if ($0 == ".moj-id") $0 = "título/linguagens/coleções (.moj-id)"
+           print "    " (k == "M" ? "diferente:      " : k == "+" ? "só no servidor: " : "só na pasta:    ") $0 }' <<<"$diff" >&2
+    die "esta pasta foi clonada antes de o 'moj pull' existir: não dá para saber se a diferença é sua ou do servidor.
+  Nada foi trocado. Escolha uma saída:
+    moj pull --force      traz a versão do servidor e guarda a sua pasta em $rel.local-AAAAMMDD-HHMMSS
+    moj push --overwrite  envia a sua versão por cima da do servidor"
+  fi
+  local bk=""
+  if [[ -n "$chg" ]]; then      # --force com mudança local: a pasta inteira vai p/ uma cópia ao lado
+    bk="$root.local-$(date +%Y%m%d-%H%M%S)"; [[ -e "$bk" ]] && bk="$bk-$$"
+    cp -Rp "$root" "$bk" || { rm -rf "$T"; die "não consegui copiar a pasta para $bk — nada foi trocado"; }
+  fi
+  _pkg_swap "$T/p" "$root"
+  cp "$T/new.man" "$root/.moj-base"; rm -rf "$T"
+  echo "atualizado: $id"
+  _chg_print "$diff"
+  if [[ -n "$bk" ]]; then
+    echo "  A sua versão anterior está em: $bk"
+    echo "  Compare com: diff -r \"$bk\" \"$root\""
+  fi
+  return 0; }
 edit_examples(){ local d="$1"
   while true; do echo; echo "Exemplos (aparecem no enunciado):"
     local i=0 f; shopt -s nullglob; for f in "$d/tests/input"/sample*; do i=$((i+1)); echo "  $i) $(basename "$f")  in: $(head -c40 "$f"|tr '\n' ' ')"; done; shopt -u nullglob
@@ -1192,9 +1472,9 @@ edit_colls(){ local d="$1" cur; cur="$(jq -r '(.collections//[])|join(",")' "$d/
   esac; }
 # moj title [dir] [--lang en|es] [<título>] — o título do problema (PT, .moj-id .title) ou da
 # tradução (.moj-id .titles[<lang>] -> `titles` do .moj-meta.json). Sem título: mostra.
-cmd_title(){ local d="." lang=pt t=""
+cmd_title(){ local d="" lang=pt t=""
   while [[ $# -gt 0 ]]; do case "$1" in --lang) lang="${2:-}"; shift 2;; *) if [[ -f "$1/.moj-id" ]]; then d="$1"; else t="$1"; fi; shift;; esac; done
-  [[ -f "$d/.moj-id" ]] || die "'$d' não é um pacote clonado (sem .moj-id) — use moj clone/new antes."
+  [[ -n "$d" ]] || d="$(pkg_root)" || die "rode dentro da pasta de um problema (a que tem o .moj-id) ou passe a pasta: moj title <dir> [<título>]"
   [[ "$lang" =~ ^(pt|en|es)$ ]] || die "--lang aceita pt, en ou es"
   if [[ -z "$t" ]]; then
     printf 'título (pt): %s\n' "$(mid "$d" title)"
@@ -1224,15 +1504,16 @@ edit_editorial(){ local d="$1" l
   l="$(ask '  idioma do editorial (pt/en/es): ' pt)"; [[ "$l" =~ ^(pt|en|es)$ ]] || return 0
   local f="$d/docs/solucao.md"; [[ "$l" == pt ]] || f="$d/docs/solucao.$l.md"
   "$ED" "$f" </dev/tty; [[ -s "$f" ]] || rm -f "$f"; }
-cmd_edit(){ need_login; local arg="${1:-}"; [[ -n "$arg" ]] || die "uso: moj edit <id|dir>"
+cmd_edit(){ need_login; local arg="${1:-}"
   [[ -r /dev/tty ]] || die "moj edit é interativo — precisa de um terminal."
   local D
-  if [[ -f "$arg/.moj-id" ]]; then D="$arg"
-  elif [[ "$arg" == *#* ]]; then D="${arg##*#}"; [[ -e "$D" ]] || cmd_clone "$arg" "$D" >/dev/null; [[ -f "$D/.moj-id" ]] || die "não consegui clonar $arg"
-  else die "passe um id (repo#prob) ou um diretório já clonado."; fi
+  if [[ -z "$arg" ]]; then D="$(pkg_root)" || die "uso: moj edit [<id|dir>]   (sem argumento: rode dentro da pasta de um problema)"
+  elif [[ -f "$arg/.moj-id" ]]; then D="$arg"
+  else arg="$(resolve_id "$arg")" || exit 1
+    D="${arg##*#}"; [[ -e "$D" ]] || cmd_clone "$arg" "$D" >/dev/null; [[ -f "$D/.moj-id" ]] || die "não consegui clonar $arg"; fi
   local id; id="$(mid "$D" id)"
   while true; do
-    echo; echo "── Editando $id  (pasta ./$D) ─────────────────────────────"
+    echo; echo "── Editando $id  (pasta $D) ─────────────────────────────"
     printf '  1) Título:    %s\n  2) Autor:     %s\n  3) Tags:      %s\n' "$(mid "$D" title)" "$(head -1 "$D/author" 2>/dev/null)" "$(paste -sd, "$D/tags" 2>/dev/null)"
     printf '  4) Enunciado  (editor)   5) Exemplos (%s)   6) Testes ocultos (%s)\n' "$(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l)" "$(( $(find "$D/tests/input" -type f 2>/dev/null|wc -l) - $(find "$D/tests/input" -name 'sample*' 2>/dev/null|wc -l) ))"
     printf '  7) Soluções (good:%s wrong:%s slow:%s)   8) Conf   9) Coleções: %s\n' "$(ls "$D/sols/good" 2>/dev/null|wc -l)" "$(ls "$D/sols/wrong" 2>/dev/null|wc -l)" "$(ls "$D/sols/slow" 2>/dev/null|wc -l)" "$(jq -r '(.collections//[])|join(",")' "$D/.moj-id")"
@@ -1282,7 +1563,7 @@ case "$cmd" in
   comp|aluno) exec_layer comp "$@";;
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
-  new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";;
+  new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";; pull) cmd_pull "$@";;
   checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";; fn|funcao) cmd_fn "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   log|history) cmd_log "$@";; restore) cmd_restore "$@";;

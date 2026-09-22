@@ -11,6 +11,9 @@ web tem.
 
 - **Editor interativo**. Rode `moj edit <id|pasta>`. O menu mostra os mesmos campos da página.
 - **Arquivos locais**. Rode `moj clone <id>`. Edite os arquivos com o seu editor. Rode `moj push`.
+- **Mudou na web?** Rode `moj pull` dentro da pasta. O `pull` traz as mudanças do servidor para a pasta.
+
+Dentro da pasta de um problema, o `<id>` é opcional. Veja [Id implícito e trabalho em equipe](#id-implícito-e-trabalho-em-equipe).
 
 ## Instalação
 
@@ -102,39 +105,40 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | Comando | O que faz | Exemplo |
 |---|---|---|
 | `moj login` · `logout` · `whoami` | Gerencia a sessão. `whoami` mostra se você pode criar problemas. | `moj whoami` |
-| `moj edit <id\|dir>` | Abre o editor interativo. | `moj edit apc#vetor1` |
+| `moj edit [<id\|dir>]` | Abre o editor interativo. | `moj edit apc#vetor1` |
 | `moj ls [mine\|shared\|public]` · `moj repos` | Lista problemas e orgs. | `moj ls mine` |
-| `moj info <id>` | Mostra tudo do problema: dono, público, coleções, validação, contagens. | `moj info apc#vetor1` |
+| `moj info [<id>]` | Mostra tudo do problema: dono, público, coleções, validação, contagens. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Cria o esqueleto do pacote em `./<prob>`. `<org>` é a org do id `<org>#<prob>`. `<prob>` é um slug minúsculo `[a-z0-9._-]`. A CLI recusa outro formato e sugere o certo. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Baixa o pacote inteiro: enunciado, conf, exemplos, testes, soluções, `scripts/` e `tests/score`. | `moj clone apc#vetor1` |
 | `moj test [dir] [--run [sol]]` | Faz o pré-voo local. Com `tests/score`, confere os grupos: distribuição, teste órfão, linha inválida. `--run` julga localmente com o mojtools. Exige Linux e bwrap. | `moj test --run` |
-| `moj push [dir] [--force]` | Envia o pacote. Cria ou edita o problema. O envio é completo, com `scripts/`. | `moj push` |
+| `moj push [dir] [--force] [--overwrite]` | Envia o pacote. Cria ou edita o problema. O envio é completo, com `scripts/`. Recusa se o problema mudou no servidor depois do seu último `clone`, `pull` ou `push`. `--overwrite` envia por cima. `--force` pula o pré-voo e o título. | `moj push` |
+| `moj pull [dir] [--force]` | Traz para a pasta as mudanças do servidor: editor web ou outro autor. Troca só os arquivos do pacote. Recusa se a pasta tem mudanças suas que não foram enviadas. `--force` copia a pasta para `<pasta>.local-AAAAMMDD-HHMMSS` e traz a versão do servidor. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnostica o ambiente · compara o build · atualiza a CLI. | `moj doctor` |
 | `moj checker <dir> <checker.cpp> [--force]` | Instala um checker testlib. Exige o mojtools local (`MOJTOOLS_DIR`). Recusa sobrescrever um `scripts/` existente. `--force` substitui. | `moj checker ./p chk.cpp` |
 | `moj interactive <dir> <arbitro> [--score]` | Instala o driver de problema interativo. Exige o mojtools local. | `moj interactive ./p arb.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Instala os drivers de submissão de função em 5 linguagens, com sentinela anti-IO. Exige o mojtools local. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renderiza o enunciado em HTML e abre no navegador. `--lang` renderiza a tradução, com o título e as explicações traduzidas. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<título>]` | Mostra ou define o título. Com `--lang`, o título da tradução. Grava no `.moj-id`. Aplica no próximo `push`. | `moj title . --lang en "Sum"` |
-| `moj download <id> [arq] [--sha <sha>]` | Baixa o pacote inteiro. `--sha` baixa a versão daquele commit. | `moj download apc#vetor1` |
-| `moj upload <id> [dir\|arq] [--force]` | Sobe o pacote inteiro. Um diretório é empacotado pela CLI. A CLI exclui `.git`, caches e `.moj-id`, e gera um `.moj-meta.json` com título, coleções e linguagens do `.moj-id`. Formatos: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. Meta ausente preserva o que está no servidor. Tar sem o arquivo `tags` preserva as tags. | `moj upload apc#vetor1 ./vetor1` |
-| `moj languages <dir> [c,cpp,py,…\|all]` | Define a lista de linguagens de submissão do problema. Sem argumento, mostra a lista. `all` libera todas as padrão. Grava no `.moj-id`. Aplica no próximo `push`. Obrigatória em problema de função ou de ban: sem ela, trocar a linguagem burla o driver. | `moj languages ./p c,py` |
+| `moj download [<id>] [arq] [--sha <sha>]` | Baixa o pacote inteiro. `--sha` baixa a versão daquele commit. | `moj download apc#vetor1` |
+| `moj upload [<id>] [dir\|arq] [--force] [--overwrite]` | Sobe o pacote inteiro. Tem a mesma trava do `push` (`--overwrite` envia por cima). Um diretório é empacotado pela CLI. A CLI exclui `.git`, caches, `.moj-id` e `.moj-base`, e gera um `.moj-meta.json` com título, coleções e linguagens do `.moj-id`. Formatos: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. Meta ausente preserva o que está no servidor. Tar sem o arquivo `tags` preserva as tags. | `moj upload apc#vetor1 ./vetor1` |
+| `moj languages [dir] [c,cpp,py,…\|all]` | Define a lista de linguagens de submissão do problema. Sem argumento, mostra a lista. `all` libera todas as padrão. Grava no `.moj-id`. Aplica no próximo `push`. Obrigatória em problema de função ou de ban: sem ela, trocar a linguagem burla o driver. | `moj languages ./p c,py` |
 | `moj export <id> [arq.tar.gz]` · `moj import <pacote> <pasta> [prob]` | Exporta no formato ICPC/Kattis. Importa um pacote Kattis como problema MOJ. O `.kattis.json` garante o round-trip. | `moj export apc#vetor1` |
 | `moj rm <id>` | Remove o problema do acervo e do treino. Pede a confirmação com o id. | `moj rm apc#velho` |
-| `moj log <id> [-n N]` · `moj log <id> <sha>` | Mostra o histórico git do problema. Cada save e cada upload é um commit. Com `<sha>`, mostra o `git show -p`. | `moj log apc#vetor1 -n 5` |
-| `moj restore <id> <sha>` | Restaura a versão do commit como um commit novo. A história fica. Público e coleções ficam. Pede a confirmação com o sha. | `moj restore apc#vetor1 a1b2c3` |
-| `moj validate <id> [--no-wait]` | Roda o portão de qualidade sem publicar. Valida enunciado, testes e soluções. Enfileira a calibração no juiz. Espera o relatório e imprime o `moj check`. `--no-wait` não espera. O problema continua privado. Atenção: cada chamada dispara uma calibração nova. Para só consultar, use `moj status` ou `moj check`. | `moj validate apc#vetor1` |
-| `moj public <id> on\|off [--yes]` · `moj publish <id> [--yes]` | Publica ou despublica. Publicar faz o servidor validar e calibrar. A org precisa permitir público. | `moj publish apc#vetor1` |
-| `moj calibrate <id> [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibra o problema. `--hosts` usa os juízes citados. `--all-judges` usa todos online. `--per-cpu` usa um juiz por modelo de CPU. `--judges` lista o parque. `--all-stale` recalibra todos os seus problemas marcados como "precisa recalibrar". Repetir não duplica. | `moj calibrate --all-stale` |
-| `moj status [<id>]` · `moj check <id>` | Sem id: saúde do sistema. Com id: QA do problema: validação, TL por juiz, solução `good` sem TL. Mostra o aviso `TL OVERRIDE` quando o conf tem `TLOVERRIDE`. Mostra o porquê de "precisa recalibrar": data, checksums e commits. | `moj check apc#vetor1` |
+| `moj log [<id>] [-n N]` · `moj log [<id>] <sha>` | Mostra o histórico git do problema. Cada save e cada upload é um commit. Com `<sha>`, mostra o `git show -p`. | `moj log apc#vetor1 -n 5` |
+| `moj restore [<id>] <sha>` | Restaura a versão do commit como um commit novo. A história fica. Público e coleções ficam. Pede a confirmação com o sha. | `moj restore apc#vetor1 a1b2c3` |
+| `moj validate [<id>] [--no-wait]` | Roda o portão de qualidade sem publicar. Valida enunciado, testes e soluções. Enfileira a calibração no juiz. Espera o relatório e imprime o `moj check`. `--no-wait` não espera. O problema continua privado. Atenção: cada chamada dispara uma calibração nova. Para só consultar, use `moj status` ou `moj check`. | `moj validate apc#vetor1` |
+| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publica ou despublica. Publicar faz o servidor validar e calibrar. A org precisa permitir público. | `moj publish apc#vetor1` |
+| `moj calibrate [<id>] [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibra o problema. `--hosts` usa os juízes citados. `--all-judges` usa todos online. `--per-cpu` usa um juiz por modelo de CPU. `--judges` lista o parque. `--all-stale` recalibra todos os seus problemas marcados como "precisa recalibrar". Repetir não duplica. | `moj calibrate --all-stale` |
+| `moj status [<id>]` · `moj check [<id>]` | Sem id: saúde do sistema. Com id: QA do problema: validação, TL por juiz, solução `good` sem TL. Mostra o aviso `TL OVERRIDE` quando o conf tem `TLOVERRIDE`. Mostra o porquê de "precisa recalibrar": data, checksums e commits. | `moj check apc#vetor1` |
 | `moj board` | Mostra o painel dos seus problemas: público, validado, calibrado e o que precisa de revisão. | `moj board` |
-| `moj calib <id>` | Mostra a calibração por extenso: cada juiz, cada solução, cada teste `{name,code,time,tl}`. Mostra `⏳ calibrando` quando há uma em voo (com o juiz e há quanto tempo) e marca `DESATUALIZADO` o juiz que calibrou outra versão do pacote. As soluções dele não são servidas: recalibre. `--json` imprime o JSON cru. | `moj --json calib apc#vetor1` |
-| `moj calib-report <id> [--host <juiz> --sol <nome>] [-o out.html]` | Baixa o `report.html` de uma solução da calibração. Sem `--host` e `--sol`, lista os disponíveis. | `moj calib-report apc#vetor1` |
-| `moj testrun <id\|dir> <arquivo> [--report out.html] [--no-wait]` | Roda uma solução avulsa no juiz, com a jaula e o TL da submissão real. Não entra no history nem no placar. Exige permissão de edição. | `moj testrun apc#vetor1 sol.cpp` |
+| `moj calib [<id>]` | Mostra a calibração por extenso: cada juiz, cada solução, cada teste `{name,code,time,tl}`. Mostra `⏳ calibrando` quando há uma em voo (com o juiz e há quanto tempo) e marca `DESATUALIZADO` o juiz que calibrou outra versão do pacote. As soluções dele não são servidas: recalibre. `--json` imprime o JSON cru. | `moj --json calib apc#vetor1` |
+| `moj calib-report [<id>] [--host <juiz> --sol <nome>] [-o out.html]` | Baixa o `report.html` de uma solução da calibração. Sem `--host` e `--sol`, lista os disponíveis. | `moj calib-report apc#vetor1` |
+| `moj testrun [<id\|dir>] <arquivo> [--report out.html] [--no-wait]` | Roda uma solução avulsa no juiz, com a jaula e o TL da submissão real. Não entra no history nem no placar. Exige permissão de edição. | `moj testrun apc#vetor1 sol.cpp` |
 | `moj testrun-status <run> [--report out.html]` | Consulta um testrun já enfileirado. | `moj testrun-status 1f3a…` |
 | `moj mkdir <org>` · `moj share <org> <login>` · `moj unshare <org> <login>` | Cria uma org. Adiciona ou remove um membro. Atenção: o login precisa existir no treino e poder criar problemas. Senão o servidor responde 404 ou 403 e não grava nada. Remover não valida. | `moj share apc monitor.ana` |
 | `moj org list\|create\|members\|public\|rm` | Gerencia orgs: membros e a trava de público. Uma org nasce privada. Só o admin da org muda a trava. `rm` remove uma org vazia. | `moj org public apc on` |
 | `moj mv <id> <org>` | Move um rascunho para outra org. O id muda para `<org>#<prob>`. Recusa problema público ou em uso. | `moj mv ana#p apc` |
-| `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | Gerencia coleções. `create "<nome>"` cria. `add` e `remove` marcam e desmarcam um problema. `show` lista. `rename` e `delete` valem para o dono da coleção. O servidor refaz as tags em segundo plano. A CLI acompanha até o fim. `--no-wait` não espera. | `moj collection add apc#vetor1 "APC 2026.1"` |
+| `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | Gerencia coleções. `create "<nome>"` cria. `add` e `remove` marcam e desmarcam um problema. `show` lista. `rename` e `delete` valem para o dono da coleção. O servidor refaz as tags em segundo plano. A CLI acompanha até o fim. `--no-wait` não espera. Na pasta do problema: `moj collection add "<coleção>"`. | `moj collection add apc#vetor1 "APC 2026.1"` |
 
 ## Pacote do problema (arquivos)
 
@@ -189,6 +193,36 @@ inteiro e manda os mesmos campos. De um diretório com `.moj-id`, a CLI gera o `
 tar. De um tar de `moj download`, o meta real já está lá. Nos dois casos, o servidor lê só os
 campos de conteúdo: título, coleções e linguagens. Campo ausente ou `[]` preserva o valor do
 servidor. `public` e `owner` nunca vêm do tar.
+
+## Id implícito e trabalho em equipe
+
+Dentro da pasta de um problema, ou de uma subpasta dela, o `<id>` é opcional. A CLI lê o id do
+`.moj-id`. Um nome sem a org usa a org do `.moj-id`. Exemplo: numa pasta da org `apc`,
+`moj publish vetor1` vale `moj publish apc#vetor1`. Exceção: `moj rm` e `moj mv` sempre pedem o id
+completo. `moj status` sem id continua mostrando a saúde do sistema. Para o problema, use `moj check`.
+
+Duas pessoas podem mexer no mesmo problema: uma pela web e outra pela CLI, ou duas pela CLI. A trava
+impede que uma apague o trabalho da outra sem aviso:
+
+1. `moj clone` grava a linha de base da pasta: a revisão do servidor (`base_rev` no `.moj-id`) e o
+   arquivo `.moj-base`.
+2. `moj push` manda a revisão. Se o problema mudou no servidor depois dela, o servidor recusa. Nada é
+   enviado. A mensagem diz quem mudou e quando.
+3. Rode `moj pull`. Ele traz a versão do servidor. Depois rode `moj push`.
+4. Se a pasta tem mudanças suas, o `moj pull` recusa e lista os arquivos. Rode `moj pull --force`. Ele
+   copia a pasta para `<pasta>.local-AAAAMMDD-HHMMSS` e traz a versão do servidor. Compare as duas
+   pastas com `diff -r` e aplique as suas mudanças de novo.
+5. Para enviar a sua versão por cima da do servidor, rode `moj push --overwrite`.
+
+O `moj pull` troca só os arquivos do pacote. Os outros arquivos da pasta ficam, por exemplo um
+`gerador.py`. Um arquivo que o servidor removeu some da pasta também.
+
+Atenção: o editor web tem a mesma trava. Ele mostra quem mudou o problema e oferece **Recarregar** ou
+**Salvar por cima**. `moj upload` tem a mesma trava e o mesmo `--overwrite`.
+
+Uma pasta clonada antes desta versão não tem linha de base. O primeiro `moj pull` compara a pasta com
+o servidor. Se forem iguais, ele grava a linha de base. Se forem diferentes, ele recusa e sugere
+`--force`. O formato do `.moj-id` e do `.moj-base` está em `cdmoj/docs/PACOTE.md`, seção 6.
 
 ## CLI do competidor (`moj-comp` / `moj comp …`)
 
@@ -315,10 +349,10 @@ compartilhar problemas existentes funciona para dono e colaborador.
 ## Portão de qualidade
 
 `moj push` faz o pré-voo local: título, enunciado, ao menos um exemplo e uma solução `good`. O
-portão autoritativo roda no servidor. `moj publish` (igual a `moj public <id> on`) faz o servidor
+portão autoritativo roda no servidor. `moj publish` (igual a `moj public [<id>] on`) faz o servidor
 validar e calibrar. Validar confere HTML, exemplos e a solução `good`. Calibrar faz um juiz rodar
 as soluções `good` e reportar o TL. O problema entra no treino livre só se o portão passar.
-Acompanhe com `moj check <id>`.
+Acompanhe com `moj check [<id>]`.
 
 **Título obrigatório.** `moj push` recusa enviar sem título. Um `.title` vazio no `.moj-id` ou o
 placeholder do `moj new` contam como sem título. Sem o título, o problema ficaria com o nome da

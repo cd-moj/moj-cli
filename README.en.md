@@ -10,6 +10,9 @@ only your MOJ login. There are two ways of working. Both give access to everythi
 
 - **Interactive editor**. Run `moj edit <id|dir>`. The menu shows the same fields as the page.
 - **Local files**. Run `moj clone <id>`. Edit the files with your editor. Run `moj push`.
+- **Changed on the web?** Run `moj pull` inside the folder. `pull` brings the server changes into the folder.
+
+Inside the folder of a problem, the `<id>` is optional. See [Implicit id and team work](#implicit-id-and-team-work).
 
 ## Installation
 
@@ -101,39 +104,40 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | Command | What it does | Example |
 |---|---|---|
 | `moj login` · `logout` · `whoami` | Manages the session. `whoami` shows if you can create problems. | `moj whoami` |
-| `moj edit <id\|dir>` | Opens the interactive editor. | `moj edit apc#vetor1` |
+| `moj edit [<id\|dir>]` | Opens the interactive editor. | `moj edit apc#vetor1` |
 | `moj ls [mine\|shared\|public]` · `moj repos` | Lists problems and orgs. | `moj ls mine` |
-| `moj info <id>` | Shows everything about the problem: owner, public, collections, validation, counts. | `moj info apc#vetor1` |
+| `moj info [<id>]` | Shows everything about the problem: owner, public, collections, validation, counts. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Creates the package skeleton in `./<prob>`. `<org>` is the org of the id `<org>#<prob>`. `<prob>` is a lowercase slug `[a-z0-9._-]`. The CLI rejects other formats and suggests the right one. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Downloads the whole package: statement, conf, examples, tests, solutions, `scripts/` and `tests/score`. | `moj clone apc#vetor1` |
 | `moj test [dir] [--run [sol]]` | Runs the local preflight. With `tests/score`, it checks the groups: distribution, orphan test, invalid line. `--run` judges locally with mojtools. It requires Linux and bwrap. | `moj test --run` |
-| `moj push [dir] [--force]` | Sends the package. It creates or edits the problem. The upload is complete, with `scripts/`. | `moj push` |
+| `moj push [dir] [--force] [--overwrite]` | Sends the package. It creates or edits the problem. The upload is complete, with `scripts/`. It refuses when the problem changed on the server after your last `clone`, `pull` or `push`. `--overwrite` sends over it. `--force` skips the preflight and the title check. | `moj push` |
+| `moj pull [dir] [--force]` | Brings the server changes into the folder: web editor or another author. It replaces only the package files. It refuses when the folder has changes that you did not send. `--force` copies the folder to `<folder>.local-YYYYMMDD-HHMMSS` and brings the server version. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnoses the environment · compares the build · updates the CLI. | `moj doctor` |
 | `moj checker <dir> <checker.cpp> [--force]` | Installs a testlib checker. It requires local mojtools (`MOJTOOLS_DIR`). It refuses to overwrite an existing `scripts/`. `--force` replaces it. | `moj checker ./p chk.cpp` |
 | `moj interactive <dir> <referee> [--score]` | Installs the interactive-problem driver. It requires local mojtools. | `moj interactive ./p ref.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Installs the function-submission drivers in 5 languages, with an anti-IO sentinel. It requires local mojtools. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renders the statement as HTML and opens it in the browser. `--lang` renders the translation, with the translated title and explanations. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<title>]` | Shows or sets the title. With `--lang`, the title of the translation. It writes to `.moj-id`. It applies on the next `push`. | `moj title . --lang en "Sum"` |
-| `moj download <id> [file] [--sha <sha>]` | Downloads the whole package. `--sha` downloads the version of that commit. | `moj download apc#vetor1` |
-| `moj upload <id> [dir\|file] [--force]` | Uploads the whole package. The CLI packs a directory. It excludes `.git`, caches and `.moj-id`, and generates a `.moj-meta.json` with the title, collections and languages from `.moj-id`. Formats: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. A missing meta keeps the server values. A tar without the `tags` file keeps the tags. | `moj upload apc#vetor1 ./vetor1` |
-| `moj languages <dir> [c,cpp,py,…\|all]` | Sets the list of submission languages of the problem. Without an argument, it shows the list. `all` allows all standard languages. It writes to `.moj-id`. It applies on the next `push`. Required for function or ban problems: without it, a language switch bypasses the driver. | `moj languages ./p c,py` |
+| `moj download [<id>] [file] [--sha <sha>]` | Downloads the whole package. `--sha` downloads the version of that commit. | `moj download apc#vetor1` |
+| `moj upload [<id>] [dir\|file] [--force] [--overwrite]` | Uploads the whole package. It has the same lock as `push` (`--overwrite` sends over it). The CLI packs a directory. It excludes `.git`, caches, `.moj-id` and `.moj-base`, and generates a `.moj-meta.json` with the title, collections and languages from `.moj-id`. Formats: `.tar.gz`, `.tar.bz2`, `.tar.zst`, `.zip`. A missing meta keeps the server values. A tar without the `tags` file keeps the tags. | `moj upload apc#vetor1 ./vetor1` |
+| `moj languages [dir] [c,cpp,py,…\|all]` | Sets the list of submission languages of the problem. Without an argument, it shows the list. `all` allows all standard languages. It writes to `.moj-id`. It applies on the next `push`. Required for function or ban problems: without it, a language switch bypasses the driver. | `moj languages ./p c,py` |
 | `moj export <id> [file.tar.gz]` · `moj import <package> <dir> [prob]` | Exports in the ICPC/Kattis format. Imports a Kattis package as a MOJ problem. The `.kattis.json` file keeps the round-trip lossless. | `moj export apc#vetor1` |
 | `moj rm <id>` | Removes the problem from the bank and from training. It asks for confirmation with the id. | `moj rm apc#old` |
-| `moj log <id> [-n N]` · `moj log <id> <sha>` | Shows the git history of the problem. Every save and every upload is a commit. With `<sha>`, it shows `git show -p`. | `moj log apc#vetor1 -n 5` |
-| `moj restore <id> <sha>` | Restores the version of the commit as a new commit. The history stays. Public and collections stay. It asks for confirmation with the sha. | `moj restore apc#vetor1 a1b2c3` |
-| `moj validate <id> [--no-wait]` | Runs the quality gate without publishing. It validates statement, tests and solutions. It queues the calibration on the judge. It waits for the report and prints `moj check`. `--no-wait` does not wait. The problem stays private. Warning: every call triggers a new calibration. To only check, use `moj status` or `moj check`. | `moj validate apc#vetor1` |
-| `moj public <id> on\|off [--yes]` · `moj publish <id> [--yes]` | Publishes or unpublishes. Publishing makes the server validate and calibrate. The org must allow public. | `moj publish apc#vetor1` |
-| `moj calibrate <id> [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibrates the problem. `--hosts` uses the listed judges. `--all-judges` uses all online judges. `--per-cpu` uses one judge per CPU model. `--judges` lists the fleet. `--all-stale` recalibrates all your problems marked "needs recalibration". Repeating does not duplicate. | `moj calibrate --all-stale` |
-| `moj status [<id>]` · `moj check <id>` | Without id: system health. With id: problem QA: validation, TL per judge, `good` solution without TL. It shows the `TL OVERRIDE` warning when the conf has `TLOVERRIDE`. It shows why the problem "needs recalibration": date, checksums and commits. | `moj check apc#vetor1` |
+| `moj log [<id>] [-n N]` · `moj log [<id>] <sha>` | Shows the git history of the problem. Every save and every upload is a commit. With `<sha>`, it shows `git show -p`. | `moj log apc#vetor1 -n 5` |
+| `moj restore [<id>] <sha>` | Restores the version of the commit as a new commit. The history stays. Public and collections stay. It asks for confirmation with the sha. | `moj restore apc#vetor1 a1b2c3` |
+| `moj validate [<id>] [--no-wait]` | Runs the quality gate without publishing. It validates statement, tests and solutions. It queues the calibration on the judge. It waits for the report and prints `moj check`. `--no-wait` does not wait. The problem stays private. Warning: every call triggers a new calibration. To only check, use `moj status` or `moj check`. | `moj validate apc#vetor1` |
+| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publishes or unpublishes. Publishing makes the server validate and calibrate. The org must allow public. | `moj publish apc#vetor1` |
+| `moj calibrate [<id>] [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibrates the problem. `--hosts` uses the listed judges. `--all-judges` uses all online judges. `--per-cpu` uses one judge per CPU model. `--judges` lists the fleet. `--all-stale` recalibrates all your problems marked "needs recalibration". Repeating does not duplicate. | `moj calibrate --all-stale` |
+| `moj status [<id>]` · `moj check [<id>]` | Without id: system health. With id: problem QA: validation, TL per judge, `good` solution without TL. It shows the `TL OVERRIDE` warning when the conf has `TLOVERRIDE`. It shows why the problem "needs recalibration": date, checksums and commits. | `moj check apc#vetor1` |
 | `moj board` | Shows the dashboard of your problems: public, validated, calibrated, and what needs review. | `moj board` |
-| `moj calib <id>` | Shows the full calibration: each judge, each solution, each test `{name,code,time,tl}`. Shows `⏳ calibrando` while one is in flight (which judge, how long ago) and marks `DESATUALIZADO` the judge that calibrated another package version. Its solutions are not served: recalibrate. `--json` prints raw JSON. | `moj --json calib apc#vetor1` |
-| `moj calib-report <id> [--host <judge> --sol <name>] [-o out.html]` | Downloads the `report.html` of a calibrated solution. Without `--host` and `--sol`, it lists the available ones. | `moj calib-report apc#vetor1` |
-| `moj testrun <id\|dir> <file> [--report out.html] [--no-wait]` | Runs one solution on the judge, with the sandbox and the TL of a real submission. It does not enter the history or the scoreboard. It requires edit permission. | `moj testrun apc#vetor1 sol.cpp` |
+| `moj calib [<id>]` | Shows the full calibration: each judge, each solution, each test `{name,code,time,tl}`. Shows `⏳ calibrando` while one is in flight (which judge, how long ago) and marks `DESATUALIZADO` the judge that calibrated another package version. Its solutions are not served: recalibrate. `--json` prints raw JSON. | `moj --json calib apc#vetor1` |
+| `moj calib-report [<id>] [--host <judge> --sol <name>] [-o out.html]` | Downloads the `report.html` of a calibrated solution. Without `--host` and `--sol`, it lists the available ones. | `moj calib-report apc#vetor1` |
+| `moj testrun [<id\|dir>] <file> [--report out.html] [--no-wait]` | Runs one solution on the judge, with the sandbox and the TL of a real submission. It does not enter the history or the scoreboard. It requires edit permission. | `moj testrun apc#vetor1 sol.cpp` |
 | `moj testrun-status <run> [--report out.html]` | Queries a queued testrun. | `moj testrun-status 1f3a…` |
 | `moj mkdir <org>` · `moj share <org> <login>` · `moj unshare <org> <login>` | Creates an org. Adds or removes a member. Warning: the login must exist in training and must be allowed to create problems. Otherwise the server answers 404 or 403 and writes nothing. Removing does not validate. | `moj share apc ta.ana` |
 | `moj org list\|create\|members\|public\|rm` | Manages orgs: members and the public lock. An org is born private. Only the org admin changes the lock. `rm` removes an empty org. | `moj org public apc on` |
 | `moj mv <id> <org>` | Moves a draft to another org. The id changes to `<org>#<prob>`. It refuses a public problem or a problem in use. | `moj mv ana#p apc` |
-| `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | Manages collections. `create "<name>"` creates. `add` and `remove` mark and unmark a problem. `show` lists. `rename` and `delete` work for the collection owner. The server re-tags in the background. The CLI follows until the end. `--no-wait` does not wait. | `moj collection add apc#vetor1 "APC 2026.1"` |
+| `moj collection ls\|show\|create\|add\|remove\|rename\|delete\|status` | Manages collections. `create "<name>"` creates. `add` and `remove` mark and unmark a problem. `show` lists. `rename` and `delete` work for the collection owner. The server re-tags in the background. The CLI follows until the end. `--no-wait` does not wait. In the folder of the problem: `moj collection add "<collection>"`. | `moj collection add apc#vetor1 "APC 2026.1"` |
 
 ## Problem package (files)
 
@@ -188,6 +192,38 @@ allows all. Example: `["pddl"]` for a problem that accepts only PDDL. The list r
 `.moj-meta.json` inside the tar. From a tar made by `moj download`, the real meta is already there.
 In both cases, the server reads only the content fields: title, collections and languages. A missing
 field or `[]` keeps the server value. `public` and `owner` never come from the tar.
+
+## Implicit id and team work
+
+Inside the folder of a problem, or inside one of its subfolders, the `<id>` is optional. The CLI
+reads the id from `.moj-id`. A name without the org uses the org of `.moj-id`. Example: in a folder
+of the org `apc`, `moj publish vetor1` means `moj publish apc#vetor1`. Exception: `moj rm` and
+`moj mv` always ask for the full id. `moj status` without an id still shows the system health. For
+the problem, use `moj check`.
+
+Two people can work on the same problem: one on the web and one with the CLI, or two with the CLI.
+The lock prevents one person from erasing the work of the other without a warning:
+
+1. `moj clone` records the baseline of the folder: the server revision (`base_rev` in `.moj-id`) and
+   the file `.moj-base`.
+2. `moj push` sends the revision. If the problem changed on the server after it, the server refuses.
+   Nothing is sent. The message tells who changed it and when.
+3. Run `moj pull`. It brings the server version. Then run `moj push`.
+4. If the folder has changes of yours, `moj pull` refuses and lists the files. Run `moj pull --force`.
+   It copies the folder to `<folder>.local-YYYYMMDD-HHMMSS` and brings the server version. Compare the
+   two folders with `diff -r` and apply your changes again.
+5. To send your version over the server version, run `moj push --overwrite`.
+
+`moj pull` replaces only the package files. Other files in the folder stay, for example a
+`gerador.py`. A file that the server removed is removed from the folder too.
+
+Warning: the web editor has the same lock. It shows who changed the problem and offers **Recarregar**
+(Reload) or **Salvar por cima** (Save over it). `moj upload` has the same lock and the same
+`--overwrite`.
+
+A folder cloned before this version has no baseline. The first `moj pull` compares the folder with
+the server. If they are equal, it records the baseline. If they differ, it refuses and suggests
+`--force`. The format of `.moj-id` and `.moj-base` is in `cdmoj/docs/PACOTE.md`, section 6.
 
 ## Competitor CLI (`moj-comp` / `moj comp …`)
 
@@ -312,10 +348,10 @@ Editing and sharing existing problems works for the owner and the collaborators.
 ## Quality gate
 
 `moj push` runs the local preflight: title, statement, at least one example and one `good` solution.
-The authoritative gate runs on the server. `moj publish` (same as `moj public <id> on`) makes the
+The authoritative gate runs on the server. `moj publish` (same as `moj public [<id>] on`) makes the
 server validate and calibrate. Validation checks the HTML, the examples and the `good` solution.
 Calibration makes a judge run the `good` solutions and report the TL. The problem enters open training
-only if the gate passes. Follow it with `moj check <id>`.
+only if the gate passes. Follow it with `moj check [<id>]`.
 
 **Title required.** `moj push` refuses to send without a title. An empty `.title` in `.moj-id` or
 the `moj new` placeholder count as no title. Without the title, the problem would get the folder

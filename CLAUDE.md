@@ -33,6 +33,22 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   listou — `statement <letra>` baixa todos (`A.html`, `A.en.html`…), `--lang` um só, idioma não
   oferecido = erro com a lista. Testes: `test/translations.sh` (funções via `MOJ_CLI_LIB_ONLY=1
   source moj`) e `test/comp-statement.sh` (curl falso; roda no artefato `dist/moj-comp` se existir).
+- **`moj pull`, trava do push e id implícito (2026-09-22, issue #2 do Daniel Saad).** Dentro da pasta de
+  um problema (ou de subpasta) o `<id>` é opcional: `pkg_root` sobe até o `.moj-id` (como o git acha o
+  `.git`), `resolve_id` (vazio → o da pasta; `org#p` → ele; pasta clonada → a dela; nome SEM org → org
+  do `.moj-id`) e `id_arg <regex-do-que-não-é-id>` define `ID`/`IDSHIFT` (a regex separa `on|off`, sha,
+  `.tar.gz`). `rm`/`mv` continuam com id explícito de propósito; `status` sem id segue sendo a saúde do
+  sistema. ⚠ `x="$(resolve_id …)" || exit 1` em comando SEPARADO do `local` (o die do subshell). Linha
+  de base: `.moj-id.base_rev` (o `rev` do servidor) + `.moj-base` (TSV `hash\tcaminho` de cada arquivo
+  do pacote + `.moj-id` com os campos de autoria; symlink entra pelo ALVO). **`pkg_files` TEM de listar
+  exatamente o que o `pkg_to_json` lê** — mexeu num, mexa no outro (senão o pull apaga/ignora arquivo
+  do pacote). `push`/`upload` mandam `base_rev`; 409 `stale_rev` vira `_stale_die` (quem/quando + as 3
+  saídas); `--overwrite` = `force` (o `--force` antigo segue sendo só "pule pré-voo/título" — não passa
+  pela trava). `moj pull` recusa com mudança local; `--force` copia a pasta p/ `<pasta>.local-<data>`;
+  troca só os arquivos do pacote (`_pkg_swap`). `moj collection add/remove` de dentro da pasta sincroniza
+  `collections`+`base_rev` quando a base era o servidor de antes (senão o próprio push seria recusado).
+  Teste ponta a ponta contra o dev: `bash test/pull-push.sh --mint <login>` (cria sessão, org e problema
+  de teste e apaga tudo; `MOJ_BIN=dist/moj` roda no artefato).
 - **Mexeu no formato do pacote?** Atualize o **`cdmoj/docs/PACOTE.md`** (fonte única) no mesmo commit;
   o `README.md` daqui só resume e aponta p/ ele — não redescreva o formato (a divergência de cópias
   já gerou o bug do título vazio).
