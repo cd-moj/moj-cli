@@ -114,7 +114,7 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj pull [dir] [--force]` | Brings the server changes into the folder: web editor or another author. It replaces only the package files. It refuses when the folder has changes that you did not send. `--force` copies the folder to `<folder>.local-YYYYMMDD-HHMMSS` and brings the server version. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnoses the environment · compares the build · updates the CLI. | `moj doctor` |
 | `moj checker <dir> <checker.cpp> [--force]` | Installs a testlib checker. It requires local mojtools (`MOJTOOLS_DIR`). It refuses to overwrite an existing `scripts/`. `--force` replaces it. | `moj checker ./p chk.cpp` |
-| `moj interactive <dir> <referee> [--score]` | Installs the interactive-problem driver. It requires local mojtools. | `moj interactive ./p ref.cpp` |
+| `moj interactive <dir> <referee> [--score]` | Installs the interactive-problem driver and writes `SAMPLE=no` in `conf`. It requires local mojtools. | `moj interactive ./p ref.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Installs the function-submission drivers in 5 languages, with an anti-IO sentinel. It requires local mojtools. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renders the statement as HTML and opens it in the browser. `--lang` renders the translation, with the translated title and explanations. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<title>]` | Shows or sets the title. With `--lang`, the title of the translation. It writes to `.moj-id`. It applies on the next `push`. | `moj title . --lang en "Sum"` |
@@ -160,10 +160,11 @@ Because of this, `moj push` and `moj upload` require a title.
   docs/notes/sample1.en.md  # (optional) the translated explanation. Without it, the example shows the PT one.
   docs/solucao.md           # (optional) editorial. Only the author sees it. It never goes to the student.
   docs/solucao.en.md        # (optional) the translated editorial (goes into the EN editorial document).
-  conf                      # TL, ulimits, STOPWHEN. Shortcuts in 'moj edit', option 8.
+  conf                      # TL, ulimits, STOPWHEN, SAMPLE=no. Shortcuts in 'moj edit', option 8.
   author                    # authors, 1 line
   tags                      # 1 tag per line
-  tests/input/sample1  tests/output/sample1   # examples (paired; shown in the statement)
+  tests/input/sample1  tests/output/sample1   # examples (paired; shown in the statement).
+                            #   No example: SAMPLE=no in conf (see below).
   tests/input/<name>   tests/output/<name>    # hidden tests (judging)
   tests/score               # (optional) score groups per subtask. It travels in push and clone.
   sols/{good,wrong,slow,pass,upcoming}/<file>   # solutions by category (good = accepted)
@@ -173,6 +174,19 @@ Because of this, `moj push` and `moj upload` require a title.
   .moj-id                   # local pointer (id, repo, prob, title, translated titles,
                             #   collections, languages, public). It is not uploaded.
 ```
+
+**Problem without an example.** In function submission, interactive problems, custom languages and
+other cases, a sample input and output make no sense to the student. In these problems:
+
+1. Do not create `tests/input/sample*`.
+2. Put `SAMPLE=no` in `conf`. With the CLI: `moj edit` → 8 (conf) → 6. In the web editor: tab
+   **Limits**, option **this problem has no samples**. `moj interactive` already writes the line.
+3. Explain the example in the statement text, in a section `## Exemplo`.
+
+With `SAMPLE=no`, the statement shows no sample box and there is no sample to download. The `moj
+push` preflight and the server validation require one of the two: at least one `sample*`, or
+`SAMPLE=no`. A hidden test is never shown as an example. The `SAMPLE` line does not trigger
+recalibration.
 
 **Languages.** Portuguese is required. A translation is a file next to it, with the language code
 in the name. The title of the translation lives in `.moj-id` (`titles`): `moj title . --lang en

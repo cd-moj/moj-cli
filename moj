@@ -740,14 +740,20 @@ score_gate(){ local d="$1" ok=1
   [[ -n "$bad" ]] && { echo "  ⚠ linha inválida no tests/score (não é '<globs> - N pontos'; o juiz ignora): $bad" >&2; ok=0; }
   [[ -n "$nog" ]] && { echo "  ⚠ teste SEM grupo (ZERA a submissão no juiz): $nog" >&2; ok=0; }
   [[ $ok -eq 1 ]]; }
+# sample_off <dir> — o conf declara SAMPLE=no: o problema NÃO tem exemplos (função, interativo,
+# linguagem própria…). A MESMA regra do mojtools/statement-langs.sh (stmt_no_samples) e do editor web.
+sample_off(){ local v; v="$(conf_get "$1" SAMPLE | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+  [[ "$v" == no || "$v" == n || "$v" == nao || "$v" == não || "$v" == false || "$v" == 0 ]]; }
 gate(){ local d="$1" ok=1
   [[ -s "$d/docs/enunciado.md" || -s "$d/enunciado.md" ]] || { echo "  ⚠ sem enunciado" >&2; ok=0; }
-  # INTERATIVO (driver run.sh por linguagem ou árbitro em scripts/) não tem sample*/output —
-  # quem corrige é o árbitro. Exigir exemplo virava um --force ritual em todo push.
-  if compgen -G "$d/scripts/*/run.sh" >/dev/null 2>&1 || compgen -G "$d/scripts/arbitro.*" >/dev/null 2>&1; then
-    echo "  (interativo: exemplos opcionais — o árbitro corrige)"
-  else
-    [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -ge 1 ]] || { echo "  ⚠ sem exemplos" >&2; ok=0; }
+  # EXEMPLOS: sample* OU SAMPLE=no no conf (a mesma exigência da validação no servidor). Teste
+  # oculto nunca vira exemplo — sem nenhum dos dois o enunciado sairia sem exemplo por engano.
+  if sample_off "$d"; then
+    echo "  (SAMPLE=no: sem caixa de exemplo no enunciado — o exemplo vai no texto)"
+  elif [[ "$(find "$d/tests/input" -maxdepth 1 -name 'sample*' 2>/dev/null | wc -l)" -lt 1 ]]; then
+    echo "  ⚠ sem exemplos: crie tests/input/sample1 e tests/output/sample1, ou, se exemplo não faz" >&2
+    echo "    sentido neste problema (função, interativo…), ponha SAMPLE=no no conf (moj edit → 8 → 6)" >&2
+    ok=0
   fi
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
   if [[ -f "$d/tests/score" ]]; then score_gate "$d" || ok=0; fi
@@ -762,7 +768,7 @@ cmd_test(){ local d="." run=0 sol="" a
     *) if [[ -d "$a" ]]; then d="$a"; elif [[ -f "$a" ]]; then sol="$a"; else die "não achei '$a' (dir do pacote ou arquivo de solução)"; fi;;
   esac; done
   [[ "$d" == . && ! -f ./.moj-id ]] && { d="$(pkg_root)" || d=.; }   # de uma subpasta: a pasta do problema
-  if gate "$d"; then echo "ok: pré-voo passou (enunciado, exemplos e solução good presentes)."
+  if gate "$d"; then echo "ok: pré-voo passou (enunciado, $(sample_off "$d" && echo 'SAMPLE=no' || echo 'exemplos') e solução good presentes)."
   else [[ $run -eq 1 ]] || return 1; echo "  (seguindo p/ o --run mesmo assim)"; fi
   [[ $run -eq 1 ]] || return 0
   local mt; mt="$(mojtools_dir)"
@@ -1090,13 +1096,16 @@ cmd_preview(){ need_login; local d="." lang=pt
   local t; t="$(mktemp -d)"
   _docs_nd "$d" "$t/imgs" 2>/dev/null
   # --lang: o texto e o título da tradução, e a explicação traduzida de cada exemplo (sem ela, a PT)
-  local body; body="$(jq -c --slurpfile im "$t/imgs" --arg l "$lang" \
+  # SAMPLE=no: o servido não tem exemplos, e o preview mostra o que o aluno vai ver
+  local noex=false; sample_off "$d" && noex=true
+  local body; body="$(jq -c --slurpfile im "$t/imgs" --arg l "$lang" --argjson noex "$noex" \
       --arg pid "$([[ -f "$d/.moj-id" ]] && jq -r '.id//""' "$d/.moj-id" || echo '')" \
       '(if $l == "pt" then {title, enunciado_md, enunciado_format, examples}
         else (.translations[$l] // {}) as $tr
           | {title:(if ($tr.title // "") != "" then $tr.title else .title end), enunciado_md:($tr.enunciado_md // ""), enunciado_format:"md",
              examples:(.examples | map(. + (if (($tr.notes // {})[.name] // "") != "" then {explanation:$tr.notes[.name]} else {} end)))} end)
        + {lang:$l}
+       + (if $noex then {examples:[]} else {} end)
        + (if ($im|length) > 0 then {images:$im} else {} end)
        + (if $pid != "" then {id:$pid} else {} end)' <<<"$(pkg_to_json "$d")")"
   local out; out="$(mktemp)"; mv "$out" "$out.html"; out="$out.html"   # sem mktemp --suffix (BSD não tem)
@@ -1451,14 +1460,17 @@ edit_sols(){ local d="$1"
     esac; done; }
 edit_conf(){ local d="$1"
   while true; do echo; echo "Configurações (conf):"
-    printf '  1) calibrafactor: %s\n  2) ULIMITS[-u]: %s\n  3) CALIBRATIONTL: %s\n  4) ALLOWPARALLELTEST: %s\n  5) STOPWHEN_WA: %s\n' \
-      "$(conf_get "$d" 'TLMOD[calibrafactor]')" "$(conf_get "$d" 'ULIMITS[-u]')" "$(conf_get "$d" CALIBRATIONTL)" "$(conf_get "$d" ALLOWPARALLELTEST)" "$(conf_get "$d" STOPWHEN_WA)"
+    printf '  1) calibrafactor: %s\n  2) ULIMITS[-u]: %s\n  3) CALIBRATIONTL: %s\n  4) ALLOWPARALLELTEST: %s\n  5) STOPWHEN_WA: %s\n  6) exemplos no enunciado: %s\n' \
+      "$(conf_get "$d" 'TLMOD[calibrafactor]')" "$(conf_get "$d" 'ULIMITS[-u]')" "$(conf_get "$d" CALIBRATIONTL)" "$(conf_get "$d" ALLOWPARALLELTEST)" "$(conf_get "$d" STOPWHEN_WA)" \
+      "$(sample_off "$d" && echo 'não (SAMPLE=no)' || echo 'sim (tests/input/sample*)')"
     case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
       1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
       2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
       3) conf_set "$d" CALIBRATIONTL "$(ask '  CALIBRATIONTL (s): ' "$(conf_get "$d" CALIBRATIONTL)")";;
       4) conf_set "$d" ALLOWPARALLELTEST "$(ask '  ALLOWPARALLELTEST (y/n): ' "$(conf_get "$d" ALLOWPARALLELTEST)")";;
       5) conf_set "$d" STOPWHEN_WA "$(ask '  STOPWHEN_WA (y/n): ' "$(conf_get "$d" STOPWHEN_WA)")";;
+      6) if sample_off "$d"; then conf_set "$d" SAMPLE ""; echo "  exemplos: sim — crie tests/input/sample1 (+ output)"
+         else conf_set "$d" SAMPLE no; echo "  SAMPLE=no: sem caixa de exemplo; ponha o exemplo no texto (## Exemplo)"; fi;;
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }

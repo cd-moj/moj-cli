@@ -115,7 +115,7 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj pull [dir] [--force]` | Traz para a pasta as mudanças do servidor: editor web ou outro autor. Troca só os arquivos do pacote. Recusa se a pasta tem mudanças suas que não foram enviadas. `--force` copia a pasta para `<pasta>.local-AAAAMMDD-HHMMSS` e traz a versão do servidor. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnostica o ambiente · compara o build · atualiza a CLI. | `moj doctor` |
 | `moj checker <dir> <checker.cpp> [--force]` | Instala um checker testlib. Exige o mojtools local (`MOJTOOLS_DIR`). Recusa sobrescrever um `scripts/` existente. `--force` substitui. | `moj checker ./p chk.cpp` |
-| `moj interactive <dir> <arbitro> [--score]` | Instala o driver de problema interativo. Exige o mojtools local. | `moj interactive ./p arb.cpp` |
+| `moj interactive <dir> <arbitro> [--score]` | Instala o driver de problema interativo e grava `SAMPLE=no` no `conf`. Exige o mojtools local. | `moj interactive ./p arb.cpp` |
 | `moj fn <dir> [--langs …] [--force]` | Instala os drivers de submissão de função em 5 linguagens, com sentinela anti-IO. Exige o mojtools local. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renderiza o enunciado em HTML e abre no navegador. `--lang` renderiza a tradução, com o título e as explicações traduzidas. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<título>]` | Mostra ou define o título. Com `--lang`, o título da tradução. Grava no `.moj-id`. Aplica no próximo `push`. | `moj title . --lang en "Sum"` |
@@ -161,10 +161,11 @@ injeta o `<h1>`. Um `% Título` no topo do enunciado é legado. O renderizador o
   docs/notes/sample1.en.md  # (opcional) a explicação traduzida. Sem ela, o exemplo mostra a PT.
   docs/solucao.md           # (opcional) editorial. Só o autor vê. Não vai ao aluno.
   docs/solucao.en.md        # (opcional) o editorial traduzido (entra no documento de editorial em EN).
-  conf                      # TL, ulimits, STOPWHEN. Atalhos no 'moj edit', opção 8.
+  conf                      # TL, ulimits, STOPWHEN, SAMPLE=no. Atalhos no 'moj edit', opção 8.
   author                    # autores, 1 linha
   tags                      # 1 tag por linha
-  tests/input/sample1  tests/output/sample1   # exemplos (pareados; aparecem no enunciado)
+  tests/input/sample1  tests/output/sample1   # exemplos (pareados; aparecem no enunciado).
+                            #   Sem exemplo: SAMPLE=no no conf (veja abaixo).
   tests/input/<nome>   tests/output/<nome>    # testes ocultos (correção)
   tests/score               # (opcional) grupos de pontuação por subtarefa. Viaja no push e no clone.
   sols/{good,wrong,slow,pass,upcoming}/<arquivo>   # soluções por categoria (good = aceita)
@@ -174,6 +175,18 @@ injeta o `<h1>`. Um `% Título` no topo do enunciado é legado. O renderizador o
   .moj-id                   # ponteiro local (id, repo, prob, título, títulos das traduções,
                             #   coleções, linguagens, público). Não é enviado.
 ```
+
+**Problema sem exemplo.** Em submissão de função, problema interativo, linguagem própria e outros
+casos, entrada e saída de exemplo não fazem sentido para o aluno. Nesses problemas:
+
+1. Não crie `tests/input/sample*`.
+2. Ponha `SAMPLE=no` no `conf`. Pela CLI: `moj edit` → 8 (conf) → 6. No editor web: aba **Limites**,
+   opção **este problema não tem exemplos**. O `moj interactive` já grava a linha.
+3. Explique o exemplo no texto do enunciado, numa seção `## Exemplo`.
+
+Com `SAMPLE=no`, o enunciado não mostra a caixa de exemplos e não há exemplo para baixar. O pré-voo
+do `moj push` e a validação no servidor exigem uma das duas coisas: pelo menos um `sample*`, ou
+`SAMPLE=no`. Teste oculto nunca aparece como exemplo. A linha `SAMPLE` não pede recalibração.
 
 **Idiomas.** O português é obrigatório. Uma tradução é um arquivo ao lado, com o código do idioma
 no nome. O título da tradução fica no `.moj-id` (`titles`): `moj title . --lang en "Hello World"`.

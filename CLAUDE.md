@@ -49,6 +49,10 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   `collections`+`base_rev` quando a base era o servidor de antes (senão o próprio push seria recusado).
   Teste ponta a ponta contra o dev: `bash test/pull-push.sh --mint <login>` (cria sessão, org e problema
   de teste e apaga tudo; `MOJ_BIN=dist/moj` roda no artefato).
+- **Problema sem exemplo (`SAMPLE=no` no `conf`, 2026-09-23)**: o pré-voo (`gate`) exige `sample*` OU
+  `SAMPLE=no` (`sample_off`, a mesma regra do mojtools `stmt_no_samples` e do editor web `sampleOff`);
+  `moj preview` manda `examples:[]` com a flag (o servido não tem exemplos); `moj edit` → 8 → 6 liga e
+  desliga. O `samples` (arquivo na raiz) morreu — não o recrie. Formato em `cdmoj/docs/PACOTE.md`.
 - **Mexeu no formato do pacote?** Atualize o **`cdmoj/docs/PACOTE.md`** (fonte única) no mesmo commit;
   o `README.md` daqui só resume e aponta p/ ele — não redescreva o formato (a divergência de cópias
   já gerou o bug do título vazio).
