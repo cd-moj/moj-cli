@@ -44,6 +44,8 @@
 #   editorial traduzido; o título traduzido fica em .moj-id `titles`. Tudo viaja no clone/push.
 # Correção especial (exigem o mojtools local)
 #   moj checker <dir> <checker.cpp>       Instala um checker testlib.
+#   moj validator [<dir>] [<validator.cpp>]   Instala (com o arquivo) e roda o validador de ENTRADA
+#                                         testlib sobre tests/input/*. Sai 1 se há entrada inválida.
 #   moj interactive <dir> <arbitro> [--score]   Instala o driver de problema interativo.
 #   moj fn <dir> [--langs c,cpp,py,java,rs]     Instala os drivers de submissão de função.
 # Histórico
@@ -958,6 +960,20 @@ cmd_checker(){ [[ $# -ge 2 ]] || die "uso: moj checker <dir> <checker.cpp> [--fo
   local mt; mt="$(mojtools_dir)"
   bash "$mt/testlib/install-checker.sh" "$@"
   echo "dica: 'moj push $1' já envia scripts/ (round-trip); 'moj test $1 --run' julga local."; }
+# moj validator [<dir>] [<validator.cpp>] — VALIDADOR DE ENTRADA (testlib, scripts/validator.cpp): com o
+# arquivo, instala; sempre compila com o g++ daqui e roda sobre cada tests/input/* pelo MESMO script que a
+# calibração usa no juiz (mojtools/testlib/validator-run.sh). Sai 1 se alguma entrada é inválida.
+cmd_validator(){ local mt dir="" src="" a rc=0
+  for a in "$@"; do
+    if [[ -z "$dir" && -d "$a" ]]; then dir="$a"
+    elif [[ -z "$src" && -f "$a" ]]; then src="$a"
+    else die "uso: moj validator [<dir>] [<validator.cpp>]   (validador de entrada testlib — ver mojtools/docs/validador-testlib.md)"; fi
+  done
+  [[ -n "$dir" ]] || dir="$(pkg_root)" || die "rode dentro da pasta do problema ou passe a pasta: moj validator <dir> [validator.cpp]"
+  mt="$(mojtools_dir)"
+  bash "$mt/testlib/install-validator.sh" "$dir" ${src:+"$src"} || rc=$?
+  [[ -n "$src" ]] && echo "dica: 'moj push' envia scripts/validator.cpp; a próxima calibração ('moj calibrate') roda o validador no juiz."
+  return "$rc"; }
 cmd_fn(){ [[ $# -ge 1 ]] || die "uso: moj fn <dir> [--langs c,cpp,py,java,rs] [--force]   (drivers de submissão de função; COMPÕE com moj checker — ver docs/submissao-de-funcao.md)"
   local mt; mt="$(mojtools_dir)"
   bash "$mt/fn/install-fn.sh" "$@"
@@ -1133,7 +1149,7 @@ cmd_upload(){ need_login
     # do servidor). Sem isto, upload de um pacote clonado zerava a whitelist de linguagens.
     local tx metad=""
     tx=(--exclude='./.git' --exclude='./.moj-id' --exclude='./.moj-base' --exclude='./.moj-base.tmp' \
-        --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.pre-normalizacao*')
+        --exclude='./.arbitro-cache' --exclude='./.checker-cache' --exclude='./.validator-cache' --exclude='./.pre-normalizacao*')
     if [[ -f "$src/.moj-id" ]]; then
       local basemeta='{}'
       [[ -f "$src/.moj-meta.json" ]] && jq -e . "$src/.moj-meta.json" >/dev/null 2>&1 && basemeta="$(cat "$src/.moj-meta.json")"
@@ -1741,6 +1757,7 @@ case "$cmd" in
   ls) cmd_ls "$@";; repos) cmd_repos "$@";; mkdir) cmd_mkdir "$@";; info|show) cmd_info "$@";;
   new) cmd_new "$@";; clone|open) cmd_clone "$@";; edit) cmd_edit "$@";; test) cmd_test "$@";; push) cmd_push "$@";; pull) cmd_pull "$@";;
   checker) cmd_checker "$@";; interactive|interativo) cmd_interactive "$@";; fn|funcao) cmd_fn "$@";;
+  validator|validador) cmd_validator "$@";;
   preview) cmd_preview "$@";; download) cmd_download "$@";; upload) cmd_upload "$@";; export) cmd_export "$@";; import) cmd_import "$@";;
   log|history) cmd_log "$@";; restore) cmd_restore "$@";;
   validate|validar) cmd_validate "$@";;
