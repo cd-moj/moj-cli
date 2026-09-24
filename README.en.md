@@ -45,7 +45,7 @@ The CLI has four layers. Each layer is one executable. Download only what you us
 | `moj` | problem author | command above |
 | `moj-contest` | contest organizer (`moj contest …` delegates here) | `curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest` |
 | `moj-comp` | competitor or student (`moj comp …` delegates here). It is the only layer with the **offline mode** | `curl -fsSL https://moj.naquadah.com.br/moj-comp -o ~/.local/bin/moj-comp && chmod +x ~/.local/bin/moj-comp` |
-| `moj-judges` | admin of the judge fleet (`moj judges …` delegates here) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
+| `moj-judges` | admin of the judge fleet (`moj judges …` delegates here): `ls`/`show` show slots, CPUs per slot, slots per NUMA node, SMT and the `hold` (a judge held for a wide job); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = global policy of parallel tests (in contests: `off`) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
 
 The served files are self-contained. The script `mkdist.sh` builds each one from `lib/core.sh` and
 the layer. When you run from the repository, each script loads `lib/core.sh` directly.
@@ -96,7 +96,9 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 - Title, author and tags are text fields.
 - Examples, tests and solutions have submenus to add, edit and remove.
 - `8) Conf` has shortcuts for the common options: `calibrafactor`, `ULIMITS`, `CALIBRATIONTL`,
-  `ALLOWPARALLELTEST`, `STOPWHEN`. It also allows raw editing of the file.
+  `ALLOWPARALLELTEST`, `STOPWHEN`, and the **parallel problem** ones: `7) CPUNEEDED` (CPUs per
+  test — OpenMP/MPI), `8) SAMENUMA` (same NUMA node) and `9) MAXPARALLELTESTS` (ceiling of tests
+  at once). It also allows raw editing of the file. Guide: `mojtools/docs/problema-paralelo.md`.
 - `9) Collections` marks the problem in existing collections. It also creates a new collection.
 
 ## `moj` commands
@@ -109,7 +111,7 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj info [<id>]` | Shows everything about the problem: owner, public, collections, validation, counts. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Creates the package skeleton in `./<prob>`. `<org>` is the org of the id `<org>#<prob>`. `<prob>` is a lowercase slug `[a-z0-9._-]`. The CLI rejects other formats and suggests the right one. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Downloads the whole package: statement, conf, examples, tests, solutions, `scripts/` and `tests/score`. | `moj clone apc#vetor1` |
-| `moj test [dir] [--run [sol]]` | Runs the local preflight. With `tests/score`, it checks the groups: distribution, orphan test, invalid line. `--run` judges locally with mojtools. It requires Linux and bwrap. | `moj test --run` |
+| `moj test [dir] [--run [sol]]` | Runs the local preflight. With `tests/score`, it checks the groups: distribution, orphan test, invalid line. It rejects an invalid `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST` (the server's rule). `--run` judges locally with mojtools. It requires Linux and bwrap. On a parallel problem it warns when the machine has fewer CPUs than `CPUNEEDED` (the time measured here is not a TL). | `moj test --run` |
 | `moj push [dir] [--force] [--overwrite]` | Sends the package. It creates or edits the problem. The upload is complete, with `scripts/`. It refuses when the problem changed on the server after your last `clone`, `pull` or `push`. `--overwrite` sends over it. `--force` skips the preflight and the title check. | `moj push` |
 | `moj pull [dir] [--force]` | Brings the server changes into the folder: web editor or another author. It replaces only the package files. It refuses when the folder has changes that you did not send. `--force` copies the folder to `<folder>.local-YYYYMMDD-HHMMSS` and brings the server version. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnoses the environment · compares the build · updates the CLI. | `moj doctor` |

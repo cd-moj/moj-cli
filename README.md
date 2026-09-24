@@ -46,7 +46,7 @@ A CLI tem quatro camadas. Cada camada é um executável. Baixe só o que você u
 | `moj` | autor de problemas | comando acima |
 | `moj-contest` | organizador de contest (`moj contest …` delega aqui) | `curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest` |
 | `moj-comp` | competidor ou aluno (`moj comp …` delega aqui). É a única camada com o **modo offline** | `curl -fsSL https://moj.naquadah.com.br/moj-comp -o ~/.local/bin/moj-comp && chmod +x ~/.local/bin/moj-comp` |
-| `moj-judges` | admin do parque de juízes (`moj judges …` delega aqui) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
+| `moj-judges` | admin do parque de juízes (`moj judges …` delega aqui): `ls`/`show` mostram slots, CPUs por slot, slots por nó NUMA, SMT e o `hold` (juiz segurado p/ um job largo); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = política global de testes em paralelo (em prova: `off`) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
 
 Os arquivos servidos são autocontidos. O script `mkdist.sh` gera cada um a partir de `lib/core.sh`
 e da camada. Quando você roda do repositório, cada script carrega `lib/core.sh` diretamente.
@@ -97,7 +97,9 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 - Título, autor e tags são campos de texto.
 - Exemplos, testes e soluções têm submenus para adicionar, editar e remover.
 - `8) Conf` tem atalhos para as opções comuns: `calibrafactor`, `ULIMITS`, `CALIBRATIONTL`,
-  `ALLOWPARALLELTEST`, `STOPWHEN`. Também permite a edição bruta do arquivo.
+  `ALLOWPARALLELTEST`, `STOPWHEN`, e os do **problema paralelo**: `7) CPUNEEDED` (CPUs por
+  teste — OpenMP/MPI), `8) SAMENUMA` (mesmo nó NUMA) e `9) MAXPARALLELTESTS` (teto de testes ao
+  mesmo tempo). Também permite a edição bruta do arquivo. Guia: `mojtools/docs/problema-paralelo.md`.
 - `9) Coleções` marca o problema em coleções existentes. Também cria uma coleção nova.
 
 ## Comandos do `moj`
@@ -110,7 +112,7 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj info [<id>]` | Mostra tudo do problema: dono, público, coleções, validação, contagens. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Cria o esqueleto do pacote em `./<prob>`. `<org>` é a org do id `<org>#<prob>`. `<prob>` é um slug minúsculo `[a-z0-9._-]`. A CLI recusa outro formato e sugere o certo. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Baixa o pacote inteiro: enunciado, conf, exemplos, testes, soluções, `scripts/` e `tests/score`. | `moj clone apc#vetor1` |
-| `moj test [dir] [--run [sol]]` | Faz o pré-voo local. Com `tests/score`, confere os grupos: distribuição, teste órfão, linha inválida. `--run` julga localmente com o mojtools. Exige Linux e bwrap. | `moj test --run` |
+| `moj test [dir] [--run [sol]]` | Faz o pré-voo local. Com `tests/score`, confere os grupos: distribuição, teste órfão, linha inválida. Reprova valor inválido de `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST` (a mesma regra do servidor). `--run` julga localmente com o mojtools. Exige Linux e bwrap. Num problema paralelo avisa quando a máquina tem menos CPUs que o `CPUNEEDED` (o tempo daqui não vale como TL). | `moj test --run` |
 | `moj push [dir] [--force] [--overwrite]` | Envia o pacote. Cria ou edita o problema. O envio é completo, com `scripts/`. Recusa se o problema mudou no servidor depois do seu último `clone`, `pull` ou `push`. `--overwrite` envia por cima. `--force` pula o pré-voo e o título. | `moj push` |
 | `moj pull [dir] [--force]` | Traz para a pasta as mudanças do servidor: editor web ou outro autor. Troca só os arquivos do pacote. Recusa se a pasta tem mudanças suas que não foram enviadas. `--force` copia a pasta para `<pasta>.local-AAAAMMDD-HHMMSS` e traz a versão do servidor. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnostica o ambiente · compara o build · atualiza a CLI. | `moj doctor` |

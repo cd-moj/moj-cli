@@ -52,6 +52,13 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   `collections`+`base_rev` quando a base era o servidor de antes (senão o próprio push seria recusado).
   Teste ponta a ponta contra o dev: `bash test/pull-push.sh --mint <login>` (cria sessão, org e problema
   de teste e apaga tudo; `MOJ_BIN=dist/moj` roda no artefato).
+- **Problema paralelo (24/09/2026)**: `moj edit → 8 → 7/8/9` grava `CPUNEEDED`/`SAMENUMA`/
+  `MAXPARALLELTESTS` (validados; vazio remove a linha = default do juiz); o pré-voo (`gate` →
+  `parallel_conf_gate`) reprova valor inválido das 4 chaves — a MESMA regra do `validate-problem.sh`
+  (`conf_parallel_sane`); `moj test --run` avisa quando `nproc < CPUNEEDED` (o b-a-t roda assim
+  mesmo, com aviso no trace). `moj-judges`: `ls`/`show` mostram `slots.cpus/by_node/smt` e `hold`;
+  `config --parallel-max`; `parallel off|auto [--cushion] [--share]` (chave `"*"` do judges-config).
+  Teste: `test/parallel-conf.sh`. Mudou CLI ⇒ os 4 tutoriais web (regra da casa).
 - **Problema sem exemplo (`SAMPLE=no` no `conf`, 2026-09-23)**: o pré-voo (`gate`) exige `sample*` OU
   `SAMPLE=no` (`sample_off`, a mesma regra do mojtools `stmt_no_samples` e do editor web `sampleOff`);
   `moj preview` manda `examples:[]` com a flag (o servido não tem exemplos); `moj edit` → 8 → 6 liga e
