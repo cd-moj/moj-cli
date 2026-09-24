@@ -64,6 +64,12 @@
 #   moj calib-report [<id>] [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
 #   moj testrun [<id|dir>] <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
 #   moj testrun-status <run>              Consulta um testrun.
+# Issues (a revisão da banca; issue aberta = o problema não está PRONTO)
+#   moj issues [<id>] [--all]             Lista as issues (--all inclui as fechadas).
+#   moj issues show [<id>] <n>            Mostra uma issue com os comentários.
+#   moj issues new [<id>] "<título>" [-m <texto>]   Abre uma issue.
+#   moj issues comment|close|reopen [<id>] <n> [-m <texto>]   Comenta, fecha ou reabre.
+#                                         O texto vem de -m ou de -F <arquivo> (-F - = stdin).
 # Orgs e coleções
 #   moj mkdir <org>                       Cria uma org.
 #   moj share <org> <login> | unshare <org> <login>   Adiciona ou remove um membro.
@@ -1239,6 +1245,76 @@ _coll_sync_local(){ local id="$1" pre="$2" cols="$3" r base had now
   return 0; }
 # COLEÇÃO = TAG de agrupamento (m:n), curada (registro com dono). ORTOGONAL à ORG (acesso). O nome
 # pode ter ESPAÇOS. Marcar um problema numa coleção exige que ela EXISTA (crie antes).
+# ISSUES POR PROBLEMA (/problems/issues): a revisão interna da banca. Issue aberta tira o problema de
+# "pronto" (moj check / moj board). Só quem edita o problema vê e mexe. O texto vem de -m "…" ou de
+# -F <arquivo> (-F - = stdin, como no git). O stdin NUNCA é lido sem -F -: num script ele pode ser um
+# pipe que nunca fecha, e o close/reopen (texto opcional) ficaria esperando para sempre.
+#   moj issues [<id>]                         lista (abertas primeiro; --all mostra as fechadas)
+#   moj issues show [<id>] <n>                uma issue com os comentários
+#   moj issues new [<id>] "<título>" [-m <texto> | -F <arquivo>]
+#   moj issues comment|close|reopen [<id>] <n> [-m <texto> | -F <arquivo>]
+_iss_text(){ # -> o texto de -m ($ISS_M) ou de -F ($ISS_F), num ARQUIVO (stdout: o caminho)
+  local f; f="$(mktemp)"
+  if [[ -n "${ISS_M+x}" ]]; then printf '%s' "$ISS_M" > "$f"
+  elif [[ "${ISS_F:-}" == - ]]; then cat > "$f"
+  elif [[ -n "${ISS_F:-}" ]]; then cat -- "$ISS_F" > "$f" 2>/dev/null || { rm -f "$f"; die "não consegui ler $ISS_F"; }
+  fi
+  printf '%s' "$f"; }
+cmd_issues(){ need_login; local sub="${1:-ls}" all=0 a args=() tf body n title j
+  case "$sub" in ls|list|show|new|open|comment|close|reopen) shift || true;; *) sub=ls;; esac
+  unset ISS_M ISS_F
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in
+      -m|--message) [[ $# -ge 1 ]] || die "faltou o texto depois de -m"; ISS_M="$1"; shift;;
+      -F|--file) [[ $# -ge 1 ]] || die "faltou o arquivo depois de -F (- = stdin)"; ISS_F="$1"; shift;;
+      --all|-a) all=1;;
+      *) args+=("$a");;
+    esac
+  done
+  set -- "${args[@]+"${args[@]}"}"
+  case "$sub" in
+    ls|list)
+      id_arg '' "$@"
+      j="$(api GET "/problems/issues?id=$(enc "$ID")")"
+      [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
+      jq -r --argjson all "$all" '(.issues // [] | map(select(.state == "closed")) | length) as $nc
+        | "\(.id) — \(.open) aberta(s), \($nc) fechada(s)"
+          + (if $nc > 0 and ($all == 0) then "   (--all mostra as fechadas)" else "" end)' <<<"$j"
+      jq -r --argjson all "$all" '(.issues // [])[] | select($all == 1 or .state == "open")
+        | "  #\(.n)\t\(if .state == "open" then "ABERTA" else "fechada" end)\t\(.title)\t\(.by) · \(.at | strflocaltime("%d/%m %H:%M"))"
+          + (if ((.comments // []) | length) > 0 then " · \(.comments | length) coment." else "" end)' <<<"$j" \
+        | { column -t -s$'\t' 2>/dev/null || cat; } ;;
+    show)
+      id_arg '^[0-9]+$' "$@"; shift "$IDSHIFT"
+      [[ "${1:-}" =~ ^[0-9]+$ ]] || die "uso: moj issues show [<id>] <n>"
+      j="$(api GET "/problems/issues?id=$(enc "$ID")")"
+      jq -e --argjson n "$1" '[.issues[] | select(.n == $n)] | length > 0' <<<"$j" >/dev/null || die "issue #$1 não existe em $ID"
+      [[ "$RAW" == 1 ]] && { jq --argjson n "$1" '.issues[] | select(.n == $n)' <<<"$j"; return; }
+      jq -r --argjson n "$1" '.issues[] | select(.n == $n)
+        | "#\(.n) [\(if .state == "open" then "ABERTA" else "fechada" end)] \(.title)",
+          "  aberta por \(.by) em \(.at | strflocaltime("%d/%m/%Y %H:%M"))"
+            + (if .state == "closed" then "; fechada por \(.closed_by // "?") em \(.closed_at | strflocaltime("%d/%m/%Y %H:%M"))" else "" end),
+          (if (.body // "") != "" then "", (.body | split("\n") | map("  " + .) | join("\n")) else empty end),
+          ((.comments // [])[] | "", "  — \(.by), \(.at | strflocaltime("%d/%m %H:%M")):", (.body | split("\n") | map("    " + .) | join("\n")))' <<<"$j" ;;
+    new|open)
+      # o título é texto livre: com 2+ argumentos o 1º é o id; com 1, o id vem da pasta
+      if [[ $# -ge 2 ]]; then ID="$(resolve_id "$1")" || exit 1; shift
+      else ID="$(resolve_id)" || exit 1; fi
+      [[ "$ID" == *#* ]] || die "id inválido: '$ID' (esperado <org>#<prob>)"
+      title="$*"; [[ -n "${title// /}" ]] || die "uso: moj issues new [<id>] \"<título>\" [-m <texto> | -F <arquivo>]"
+      tf="$(_iss_text)"
+      body="$(jq -Rsc --arg id "$ID" --arg t "$title" '{id:$id, action:"open", title:$t, body:.}' < "$tf")"; rm -f "$tf"
+      api POST "/problems/issues" "$body" | out '"issue #\(.issue.n) aberta em \(.id): \(.issue.title)  (\(.open) aberta(s))"' ;;
+    comment|close|reopen)
+      id_arg '^[0-9]+$' "$@"; shift "$IDSHIFT"
+      [[ "${1:-}" =~ ^[0-9]+$ ]] || die "uso: moj issues $sub [<id>] <n> [-m <texto> | -F <arquivo>]"
+      n="$1"; tf="$(_iss_text)"
+      [[ "$sub" != comment || -s "$tf" ]] || { rm -f "$tf"; die "falta o texto: moj issues comment [<id>] $n -m \"…\" (ou -F <arquivo>)"; }
+      body="$(jq -Rsc --arg id "$ID" --arg a "$sub" --argjson n "$n" '{id:$id, action:$a, n:$n, body:.}' < "$tf")"; rm -f "$tf"
+      api POST "/problems/issues" "$body" \
+        | out '"issue #\(.issue.n) de \(.id): " + (if .issue.state == "open" then "aberta" else "fechada" end)
+               + " · \((.issue.comments // []) | length) comentário(s) · \(.open) aberta(s) no problema"' ;;
+  esac; }
 cmd_collection(){ need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
     ls) api GET "/problems/collections" | jq -r '.collections[]? | "  \(.name)\t[\(.count) probs, \(.public) púb]\tdono:\(.owner//"—")\(if .can_manage then "  *gerencio*" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
@@ -1673,6 +1749,7 @@ case "$cmd" in
   calib) cmd_calib "$@";; calib-report) cmd_calib_report "$@";;
   testrun|test-run) cmd_testrun "$@";; testrun-status) cmd_testrun_status "$@";;
   share) cmd_share "$@";; unshare) cmd_unshare "$@";; collection|coll) cmd_collection "$@";; rm|remove) cmd_rm "$@";;
+  issues|issue) cmd_issues "$@";;
   languages|langs|lang) cmd_languages "$@";; title|titulo) cmd_title "$@";;
   org|orgs) cmd_org "$@";; mv|move) cmd_mv "$@";;
   help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;

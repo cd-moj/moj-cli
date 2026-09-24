@@ -11,7 +11,9 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   (público => o servidor **valida + calibra**, via `set-public`), `calibrate`, `status [<id>]` /
   `check <id>` (QA: pacote + TL por juiz + solução good sem TL / falhou em todas as máquinas + soluções × categoria + entradas + `pronto: SIM` ou as pendências — os textos saem do `_RDY_JQ`, que só TRADUZ os códigos do servidor: a regra é do `lib/calib-expect.sh`),
   `calibrate` (global, `--hosts/--all-judges/--per-cpu` = direcionada como na web, `--judges` =
-  lista do parque, `--all-stale` = lote), `calib` (a calibração POR EXTENSO, por juiz/solução/teste — `--json` p/ ferramentas externas),
+  lista do parque, `--all-stale` = lote), `issues` (as issues do problema — `/problems/issues`; o texto só
+  vem de `-m`/`-F`, o stdin nunca é lido sem `-F -`: pipe herdado que não fecha travaria o close; teste
+  `test/issues.sh`), `calib` (a calibração POR EXTENSO, por juiz/solução/teste — `--json` p/ ferramentas externas),
   `calib-report` (baixa o report.html de uma solução calibrada), `testrun`/`testrun-status`
   (roda UMA solução avulsa NO JUIZ, fora do history — exige permissão de edição),
   `share` (= adiciona membro à org), `org` (list/create/members/public/rm — **ACESSO**: a org é o
