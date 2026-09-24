@@ -412,7 +412,7 @@ def xwant: if . == "good" then "esperado: aceita em todos os testes, dentro do T
   elif . == "wrong" then "esperado: ser reprovada, de preferência por WA" else "" end;
 def xgot: (.why // "") as $w | (.counts // {} | del(.AC) | {counts: .} | ctext) as $n
   | if $w == "all_ac" then "aceita em todos os testes"
-    elif $w == "over_tl" then "aceita, mas levou \(.tmax)s — acima do TL de \(.tl)s que o juiz cobra (TLOVERRIDE baixo?)"
+    elif $w == "over_tl" then "aceita, mas levou \(.tmax)s — acima do TL de \(.tl)s\(if (.drift // 0) > 0 then " + \(.drift)s de tolerância" else "" end) que o juiz cobra (TLOVERRIDE baixo?)"
     elif $w == "failed" then "não foi aceita: \($n)"
     elif $w == "tle_allowed" then "TLE permitido pelo conf (ALLOWTLEDURINGCALIBRATION=y)"
     elif $w == "tle" then "estourou o tempo"
