@@ -125,12 +125,12 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj rm <id>` | Removes the problem from the bank and from training. It asks for confirmation with the id. | `moj rm apc#old` |
 | `moj log [<id>] [-n N]` · `moj log [<id>] <sha>` | Shows the git history of the problem. Every save and every upload is a commit. With `<sha>`, it shows `git show -p`. | `moj log apc#vetor1 -n 5` |
 | `moj restore [<id>] <sha>` | Restores the version of the commit as a new commit. The history stays. Public and collections stay. It asks for confirmation with the sha. | `moj restore apc#vetor1 a1b2c3` |
-| `moj validate [<id>] [--no-wait]` | Runs the quality gate without publishing. It validates statement, tests and solutions. It queues the calibration on the judge. It waits for the report and prints `moj check`. `--no-wait` does not wait. The problem stays private. Warning: every call triggers a new calibration. To only check, use `moj status` or `moj check`. | `moj validate apc#vetor1` |
-| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publishes or unpublishes. Publishing makes the server validate and calibrate. The org must allow public. | `moj publish apc#vetor1` |
+| `moj validate [<id>] [--no-wait]` | Runs the quality gate without publishing. It checks the package (static: statement, examples, tests, presence of a `good`). It queues the calibration on the judge, which runs the solutions. It waits for the report and prints `moj check`. `--no-wait` does not wait. The problem stays private. Warning: every call triggers a new calibration. To only check, use `moj status` or `moj check`. | `moj validate apc#vetor1` |
+| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publishes or unpublishes. Publishing makes the server check the package and calibrate. The org must allow public. If the problem is not ready yet, it shows the pending items and asks for confirmation (`--yes` shows them and goes on). | `moj publish apc#vetor1` |
 | `moj calibrate [<id>] [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibrates the problem. `--hosts` uses the listed judges. `--all-judges` uses all online judges. `--per-cpu` uses one judge per CPU model. `--judges` lists the fleet. `--all-stale` recalibrates all your problems marked "needs recalibration". Repeating does not duplicate. | `moj calibrate --all-stale` |
-| `moj status [<id>]` · `moj check [<id>]` | Without id: system health. With id: problem QA: validation, TL per judge, `good` solution without TL. It shows the `TL OVERRIDE` warning when the conf has `TLOVERRIDE`. It shows why the problem "needs recalibration": date, checksums and commits. | `moj check apc#vetor1` |
-| `moj board` | Shows the dashboard of your problems: public, validated, calibrated, and what needs review. | `moj board` |
-| `moj calib [<id>]` | Shows the full calibration: each judge, each solution, each test `{name,code,time,tl}`. Shows `⏳ calibrando` while one is in flight (which judge, how long ago) and marks `DESATUALIZADO` the judge that calibrated another package version. Its solutions are not served: recalibrate. `--json` prints raw JSON. | `moj --json calib apc#vetor1` |
+| `moj status [<id>]` · `moj check [<id>]` | Without id: system health. With id: problem QA: package (static check), TL per judge, `good` solution without TL, solutions against their category, inputs (validator) and the line `pronto: SIM` (ready) or the pending items. It shows the `TL OVERRIDE` warning when the conf has `TLOVERRIDE`. It shows why the problem "needs recalibration": date, checksums and commits. | `moj check apc#vetor1` |
+| `moj board` | Shows the dashboard of your problems: public, package, calibrated, solutions, ready, and what needs review. | `moj board` |
+| `moj calib [<id>]` | Shows the full calibration: each judge, each solution, each test `{name,code,time,tl}`. Each solution comes with the server's judgement (`✓ conforme`, `≈ conforme, outro motivo`, `✗ DIVERGENTE`, `✗ NÃO RODOU`) and an "expected; got" line. It also shows the inputs that the validator rejected. Shows `⏳ calibrando` while one is in flight (which judge, how long ago) and marks `DESATUALIZADO` the judge that calibrated another package version. Its solutions are not served: recalibrate. `--json` prints raw JSON. | `moj --json calib apc#vetor1` |
 | `moj calib-report [<id>] [--host <judge> --sol <name>] [-o out.html]` | Downloads the `report.html` of a calibrated solution. Without `--host` and `--sol`, it lists the available ones. | `moj calib-report apc#vetor1` |
 | `moj testrun [<id\|dir>] <file> [--report out.html] [--no-wait]` | Runs one solution on the judge, with the sandbox and the TL of a real submission. It does not enter the history or the scoreboard. It requires edit permission. | `moj testrun apc#vetor1 sol.cpp` |
 | `moj testrun-status <run> [--report out.html]` | Queries a queued testrun. | `moj testrun-status 1f3a…` |
@@ -363,9 +363,12 @@ Editing and sharing existing problems works for the owner and the collaborators.
 
 `moj push` runs the local preflight: title, statement, at least one example and one `good` solution.
 The authoritative gate runs on the server. `moj publish` (same as `moj public [<id>] on`) makes the
-server validate and calibrate. Validation checks the HTML, the examples and the `good` solution.
-Calibration makes a judge run the `good` solutions and report the TL. The problem enters open training
-only if the gate passes. Follow it with `moj check [<id>]`.
+server check the package and calibrate. The package check is static: HTML, examples, paired tests and
+the presence of a `good` solution (it runs nothing). Calibration makes a judge run ALL solutions: the
+`good` ones measure the TL, and each solution is checked against its category (table in
+`cdmoj/docs/PACOTE.md` §10). The problem enters open training when the package check passes. If it is
+not **ready** yet (package, calibration, solutions, inputs), publishing shows the pending items and asks
+for confirmation. Follow it with `moj check [<id>]`: the last line says `pronto: SIM` or what is missing.
 
 **Title required.** `moj push` refuses to send without a title. An empty `.title` in `.moj-id` or
 the `moj new` placeholder count as no title. Without the title, the problem would get the folder

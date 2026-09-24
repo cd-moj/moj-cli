@@ -18,7 +18,8 @@
 #   moj repos                             Lista orgs.
 #   moj board                             Mostra o painel dos seus problemas e o que revisar.
 #   moj status [<id>] | check [<id>]      status sem id: saúde do sistema. check: QA do problema
-#                                         (validação, TL por juiz, solução good sem TL).
+#                                         (pacote, TL por juiz, soluções × categoria, entradas,
+#                                         e se está PRONTO ou o que falta).
 # Pacote
 #   moj new <org> <prob>                  Cria o esqueleto do pacote em ./<prob>.
 #   moj clone <id> [dir]                  Baixa o pacote inteiro.
@@ -49,14 +50,17 @@
 #   moj log [<id>] [-n N] | moj log [<id>] <sha>  Mostra o histórico git. Com <sha>, mostra o diff.
 #   moj restore [<id>] <sha>              Restaura a versão como um commit novo.
 # Portão de qualidade
-#   moj validate [<id>] [--no-wait]       Valida e enfileira a calibração. Não publica.
+#   moj validate [<id>] [--no-wait]       Confere o pacote (estático) e enfileira a calibração. Não publica.
 #                                         Atenção: cada chamada recalibra. Para consultar, use status/check.
-#   moj public [<id>] on|off [--yes]      Publica ou despublica.
+#   moj public [<id>] on|off [--yes]      Publica ou despublica. Problema ainda não PRONTO: mostra as
+#                                         pendências e pede confirmação (--yes mostra e segue).
 #   moj publish [<id>]                    Publica. O servidor valida e calibra.
 #   moj calibrate [<id>] [--hosts h1,h2|--all-judges|--per-cpu] | --judges | --all-stale
 #                                         Calibra nos juízes escolhidos. --judges lista o parque.
 #                                         --all-stale recalibra o lote do painel.
-#   moj calib [<id>]                      Mostra a calibração por extenso (--json = JSON cru).
+#   moj calib [<id>]                      Mostra a calibração por extenso: cada solução com o que a
+#                                         categoria pede e o que obteve; o validador de entrada
+#                                         (--json = JSON cru).
 #   moj calib-report [<id>] [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
 #   moj testrun [<id|dir>] <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
 #   moj testrun-status <run>              Consulta um testrun.
@@ -373,11 +377,73 @@ cmd_ls(){ need_login; local tab="${1:-mine}" j; j="$(api_get_cached 60 "/problem
 cmd_mkdir(){ need_login; [[ $# -ge 1 ]] || die "uso: moj mkdir <org>   (= moj org create; a org é o <org> do id)"; api POST "/problems/repo-create" "$(jq -n --arg r "$1" '{repo:$r}')" | jq -r '"org criada: \(.repo) (você é admin)"'; }
 # <id> OPCIONAL nos comandos de problema: dentro da pasta dele (ou de uma subpasta) vale o do .moj-id,
 # e o nome sem a org usa a org do .moj-id (issue #2). Ver id_arg/resolve_id.
+# TEXTOS de "o problema está pronto?". A REGRA é do servidor (lib/calib-expect.sh + /problems/status:
+# `expect` de cada solução, `summary`/`validator` da calibração, `pending`); aqui só se traduz o que ele
+# devolve — as mesmas frases do web/problemas/readiness.js. Nunca refaça o juízo aqui.
+_RDY_JQ='
+def rdy_arg: if test(":") then sub("^[^:]*:"; "") else "" end;
+def plabel: sub(":.*$"; "") as $k | rdy_arg as $a
+  | if $k == "package_failed" then "pacote com erro (moj check)"
+    elif $k == "package_unchecked" then "pacote não conferido (moj validate)"
+    elif $k == "uncalibrated" then "sem calibração (moj calibrate)"
+    elif $k == "needs_recalibration" then "precisa recalibrar (moj calibrate)"
+    elif $k == "good_no_tl" then "solução good sem tempo-limite: \($a)"
+    elif $k == "sols_divergent" then "\($a) solução(ões) divergente(s) (moj calib)"
+    elif $k == "sols_unchecked" then "soluções não conferidas desde a última edição (moj calibrate)"
+    elif $k == "inputs_invalid" then "\($a) entrada(s) inválida(s) pelo validador (moj calib)"
+    elif $k == "inputs_error" then "o validador de entrada não rodou (moj calib)"
+    elif $k == "issues_open" then "\($a) issue(s) aberta(s) (moj issues)"
+    else . end;
+def ctext: (.counts // {}) as $c | ["AC","WA","TLE","MLE","RE","UE"] | map(select($c[.] != null) | "\(.) \($c[.])") | join(" · ");
+def xpill: (.state // "") as $s
+  | if $s == "ok" then "✓ conforme" elif $s == "note" then "≈ conforme, outro motivo"
+    elif $s == "bad" then "✗ DIVERGENTE" elif $s == "norun" then "✗ NÃO RODOU" else "•" end;
+def xwant: if . == "good" then "esperado: aceita em todos os testes, dentro do TL que o juiz cobra"
+  elif . == "pass" then "esperado: aceita em todos os testes, dentro do TL"
+  elif . == "slow" then "esperado: TLE em pelo menos 1 teste, sem errar os outros"
+  elif . == "wrong" then "esperado: ser reprovada, de preferência por WA" else "" end;
+def xgot: (.why // "") as $w | (.counts // {} | del(.AC) | {counts: .} | ctext) as $n
+  | if $w == "all_ac" then "aceita em todos os testes"
+    elif $w == "over_tl" then "aceita, mas levou \(.tmax)s — acima do TL de \(.tl)s que o juiz cobra (TLOVERRIDE baixo?)"
+    elif $w == "failed" then "não foi aceita: \($n)"
+    elif $w == "tle_allowed" then "TLE permitido pelo conf (ALLOWTLEDURINGCALIBRATION=y)"
+    elif $w == "tle" then "estourou o tempo"
+    elif $w == "tle_and_wrong" then "estourou o tempo, mas também errou (\($n)) — a lenta deveria ser correta"
+    elif $w == "wrong_no_tle" then "errou sem estourar o tempo (\($n))"
+    elif $w == "no_tle" then "passou em todos no tempo — o TL não pega esta solução"
+    elif $w == "wa" then "WA — os testes pegam o erro"
+    elif $w == "failed_other" then "reprovada por \($n), não por WA — confira se era esse o erro"
+    elif $w == "accepted" then "foi ACEITA — os testes não pegam o erro"
+    elif $w == "ce" then "não compilou — não prova nada sobre os testes"
+    elif $w == "lang" then "linguagem indisponível neste juiz"
+    elif $w == "ue" then "erro do corretor/juiz (UE)"
+    elif $w == "noverdict" then "sem veredicto" else "" end;
+def vtext: (.state // "") as $s
+  | if $s == "none" then "sem validador (scripts/validator.cpp)"
+    elif $s == "ok" then "validador aprovou as \(.total) entradas"
+    elif $s == "invalid" then "\(.invalid) de \(.total) entradas INVÁLIDAS"
+    elif $s == "error" then "o validador não rodou (não compilou?)" else "não conferidas" end;
+def stext: (.state // "") as $s
+  | if $s == "ok" then "todas conforme"
+    elif $s == "note" then "todas conforme (\(.note) por outro motivo)"
+    elif $s == "bad" then "\(.bad) DIVERGENTE(S)"
+    elif $s == "partial" then "parcial — há solução sem resultado (moj calibrate)"
+    elif $s == "stale" then "não conferidas desde a última edição (moj calibrate)"
+    else "sem resultado ainda" end;
+'
 cmd_publish(){ need_login; id_arg '' "$@"; shift "$IDSHIFT"; cmd_public "$ID" on "$@"; }
 cmd_public(){ need_login; id_arg '^(on|off)$' "$@"; shift "$IDSHIFT"
   [[ $# -ge 1 && "$1" =~ ^(on|off)$ ]] || die "uso: moj public [<id>] on|off [--yes]"
   local id="$ID" onoff="$1" yes=0 a; shift; for a in "$@"; do [[ "$a" == --yes || "$a" == -y ]] && yes=1; done
   local v=false; [[ "$onoff" == on ]] && v=true
+  # NÃO PRONTO sinaliza e confirma (decisão do Ribas, 24/09/2026): as pendências do servidor vão para
+  # a tela antes da pergunta. Com --yes elas saem como aviso e a publicação segue (scripts).
+  if [[ "$v" == true ]]; then
+    local st pend
+    st="$(api GET "/problems/status?id=$(enc "$id")" 2>/dev/null)" || st='{}'
+    pend="$(jq -r "$_RDY_JQ"'(.problems // [])[0].pending // [] | .[] | "  • " + plabel' <<<"$st" 2>/dev/null)" || pend=""
+    [[ -n "$pend" ]] && printf '⚠ o problema ainda NÃO está pronto:\n%s\n' "$pend" >&2
+  fi
   # TORNAR PÚBLICO é ação cautelosa: confirma (provas devem ficar privadas). --yes p/ scripts.
   if [[ "$v" == true && "$yes" -eq 0 ]]; then
     echo "⚠ TORNAR PÚBLICO publica '$id' no TREINO LIVRE (visível a TODOS). Provas devem ficar privadas." >&2
@@ -497,13 +563,17 @@ cmd_status(){ need_login
   api GET "/index/status" | out '"  juízes online: \(.judge.online)/\(.judge.total)  (ocupados \(.judge.busy), \(.judge.cpus_online) CPUs, \(.judge.gpus_online) com GPU)\n  fila: \(.queue.total_pending) pendentes (\(.queue.spool_queued) no spool)\n  daemons: judged=\(.daemons.judged) result-sink=\(.daemons.result_sink)" + (if .alert.no_judges then "\n  ⚠ trabalho na fila e NENHUM juiz online" else "" end)'; }
 # QA COMPLETO de um problema: validação (testado em todos os casos) + calibração (TL por juiz +
 # solução good que falhou em TODAS as máquinas) + TL servido/staleness.
-cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt
+cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
   vt="$(api GET "/problems/validation?id=$(enc "$id")" 2>/dev/null)" || vt='{}'
   ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
   tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
-  [[ "$RAW" == 1 ]] && { jq -cn --argjson v "$vt" --argjson c "$ct" --argjson t "$tt" '{validation:$v, calib:$c, tl:$t}'; return; }
+  st="$(api GET "/problems/status?id=$(enc "$id")" 2>/dev/null)" || st='{}'
+  [[ "$RAW" == 1 ]] && { jq -cn --argjson v "$vt" --argjson c "$ct" --argjson t "$tt" --argjson s "$st" \
+    '{validation:$v, calib:$c, tl:$t, status:(($s.problems // [])[0] // null)}'; return; }
   local validado calibrado recal miss bcal
-  validado="$(jq -r 'if (.checks|not) or .status=="unvalidated" then "não validado" elif .ok then "APROVADO" else "REPROVADO" end' <<<"$vt" 2>/dev/null)"
+  # PACOTE (era "validado"): a conferência ESTÁTICA do validate-problem.sh — não roda solução
+  # nenhuma. Quem roda é a calibração: soluções e entradas vêm dela (linhas abaixo).
+  validado="$(jq -r 'if (.checks|not) or .status=="unvalidated" then "não conferido" elif .ok then "OK" else "COM ERRO" end' <<<"$vt" 2>/dev/null)"
   # calibração EM VOO (pendente/rodando): o TL ainda vazio é ESPERADO, não falha.
   # (fallback false: servidor antigo sem o campo => comportamento de antes.)
   bcal="$(jq -r '.being_calibrated // false' <<<"$tt" 2>/dev/null)"
@@ -515,7 +585,11 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt
     recal="$(jq -r 'if .needs_recalibration then "SIM ⚠" else "não" end' <<<"$tt" 2>/dev/null)"
   fi
   miss="$(jq -rc '(.missing_langs // [])|join(", ")' <<<"$ct" 2>/dev/null)"
-  printf '%s\n  validado: %s   calibrado: %s   precisa recalibrar: %s\n' "$id" "${validado:-?}" "${calibrado:-?}" "${recal:-?}"
+  printf '%s\n  pacote: %s   calibrado: %s   precisa recalibrar: %s\n' "$id" "${validado:-?}" "${calibrado:-?}" "${recal:-?}"
+  # SOLUÇÕES × categoria e ENTRADAS (validador), e o veredito final: pronto ou as pendências
+  jq -r "$_RDY_JQ"'(.problems // [])[0] // empty
+    | "  soluções: \(.sols | stext)   entradas: \(.inputs | vtext)",
+      (if .ready then "  pronto: SIM" else "  pronto: NÃO — " + ((.pending // []) | map(plabel) | join("; ")) end)' <<<"$st" 2>/dev/null || true
   # o PORQUÊ da recalibração: quando calibrou, checksums e os commits que afetam o TL desde então
   if [[ "$(jq -r '.needs_recalibration // false' <<<"$tt" 2>/dev/null)" == true ]]; then
     jq -r '"  ⚠ MOTIVO: \(.reason // "pacote mudou desde a calibração")"
@@ -530,7 +604,7 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt
   elif [[ -n "$miss" ]]; then
     printf '  ⚠ REVISAR: solução good SEM TL em [%s] — falhou em TODAS as máquinas de juiz\n' "$miss"
   fi
-  echo "  Validação (testado em todos os casos):"
+  echo "  Pacote (conferência estática — não roda soluções; elas rodam na calibração):"
   jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
   echo "  Time limits (máx entre juízes):"
   jq -r '(.time_limits//{})|to_entries|map(select(.key!="default"))| if length==0 then "    (sem TL)" else (map("    \(.key): \(.value)s")|join("\n")) end' <<<"$tt" 2>/dev/null
@@ -554,17 +628,28 @@ cmd_calib(){ need_login; id_arg '' "$@"
           else "" end) +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
+  # soluções × o que a categoria pede, somado entre os juízes da versão atual (o número do Painel)
+  jq -r '(.summary // null) as $s | if $s == null or (($s.total // 0) == 0 and (($s.missing // []) | length) == 0) then empty
+    else "  soluções: \(($s.total // 0) - ($s.bad // 0)) de \($s.total // 0) conforme"
+      + (if ($s.note // 0) > 0 then " · \($s.note) por outro motivo" else "" end)
+      + (if ($s.bad // 0) > 0 then " · \($s.bad) DIVERGENTE(S): \($s.bad_files | join(", "))" else "" end)
+      + (if (($s.missing // []) | length) > 0 then " · sem resultado: \($s.missing | join(", ")) (moj calibrate)" else "" end) end' <<<"$j" 2>/dev/null || true
   # juiz `stale` = calibrou OUTRA versão do pacote: o servidor NÃO manda as sols dele (mostrar a
   # lista velha fazia o autor ver solução já apagada como se fosse a de agora). Diga isso, em vez
   # de repetir "ainda não reportou" — que é outra coisa (juiz/mojtools antigos).
-  jq -r '. as $r | (.hosts // [])[] |
+  jq -r "$_RDY_JQ"'. as $r | (.hosts // [])[] |
     "— \(.host)  \(.at // 0 | todate)  TL: " + ((.tl // {})|to_entries|map("\(.key)=\(.value)")|join(" ")) +
       (if .stale then "   ⚠ DESATUALIZADO (versão \((.version // "?")[0:8])) — recalibre" else "" end),
     (if .stale then "  (as soluções deste juiz são de uma versão anterior do pacote — rode: moj calibrate \($r.id // ""))"
      elif ((.sols // [])|length) > 0 then
-      (.sols[] | "  \(.category)/\(.file) [\(.lang)]: \(.verdict)",
+      (.sols[] | "  [\(.expect | xpill)] \(.category)/\(.file) [\(.lang)]: \(.verdict)",
+        (if (.category | xwant) != "" then "      \(.category | xwant); obtido: \(.expect | xgot)" else empty end),
         ((.tests // [])[] | "    \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"))
-     else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end)' <<<"$j" 2>/dev/null
+     else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end),
+    (if (.stale | not) and .validator != null then
+       "  entradas: \(.validator | vtext)",
+       ((.validator.tests // [])[] | select(.code != "OK") | "    ✗ \(.name): \(.msg // .code)")
+     else empty end)' <<<"$j" 2>/dev/null
 }
 # report.html de UMA solução da calibração, por juiz (GET /problems/calib-report).
 cmd_calib_report(){ need_login
@@ -646,9 +731,12 @@ cmd_testrun_status(){ need_login; [[ $# -ge 1 ]] || die "uso: moj testrun-status
 # PAINEL dos meus problemas: o que precisa de atenção, de relance (GET /problems/status).
 cmd_board(){ need_login; local j; j="$(api GET "/problems/status")"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
-  jq -r '.counts as $c | "  \(.total) problemas · \($c.needs_review // 0) revisar · \($c.good_sol_no_tl // 0) good sem TL · \($c.public_unvalidated // 0) público não validado · \($c.needs_recalibration // 0) recalibrar"' <<<"$j"
-  { printf 'PROBLEMA\tPÚBLICO\tVALIDADO\tCALIBRADO\tREVISAR\n'
-    jq -r '(.problems//[]) | sort_by(if .needs_review then 0 elif .needs_recalibration then 1 else 2 end) | .[] | "\(.id)\t\(if .public then "sim" else "não" end)\t\(if .validated=="ok" then "OK" elif .validated=="error" then "REPROV" else "—" end)\t\(if .calibrated then "sim" else "não" end)\t\((.review_reasons//[])|join(","))"' <<<"$j"
+  jq -r '.counts as $c | "  \(.total) problemas · \($c.ready // 0) prontos · \($c.needs_review // 0) revisar · \($c.sols_divergent // 0) com solução divergente · \($c.inputs_invalid // 0) com entrada inválida · \($c.good_sol_no_tl // 0) good sem TL · \($c.needs_recalibration // 0) recalibrar"' <<<"$j"
+  # PACOTE = conferência estática (era "VALIDADO"); SOLUÇÕES = cada uma fez o que a categoria pede
+  { printf 'PROBLEMA\tPÚBLICO\tPACOTE\tCALIBRADO\tSOLUÇÕES\tPRONTO\tREVISAR\n'
+    jq -r '(.problems//[]) | sort_by(if .needs_review then 0 elif .needs_recalibration then 1 else 2 end) | .[]
+      | (.sols.state // "") as $s
+      | "\(.id)\t\(if .public then "sim" else "não" end)\t\(if .validated=="ok" then "OK" elif .validated=="error" then "ERRO" else "—" end)\t\(if .calibrated then "sim" else "não" end)\t\(if $s=="ok" or $s=="note" then "ok" elif $s=="bad" then "\(.sols.bad) ✗" elif $s=="partial" or $s=="stale" then "conferir" else "—" end)\t\(if .ready then "sim" elif .ready == false then "\((.pending // [])|length) pend." else "?" end)\t\((.review_reasons//[])|join(","))"' <<<"$j"
   } | { column -t -s$'\t' 2>/dev/null || cat; }
 }
 cmd_info(){ need_login; id_arg '' "$@"

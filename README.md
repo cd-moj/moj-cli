@@ -126,12 +126,12 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj rm <id>` | Remove o problema do acervo e do treino. Pede a confirmação com o id. | `moj rm apc#velho` |
 | `moj log [<id>] [-n N]` · `moj log [<id>] <sha>` | Mostra o histórico git do problema. Cada save e cada upload é um commit. Com `<sha>`, mostra o `git show -p`. | `moj log apc#vetor1 -n 5` |
 | `moj restore [<id>] <sha>` | Restaura a versão do commit como um commit novo. A história fica. Público e coleções ficam. Pede a confirmação com o sha. | `moj restore apc#vetor1 a1b2c3` |
-| `moj validate [<id>] [--no-wait]` | Roda o portão de qualidade sem publicar. Valida enunciado, testes e soluções. Enfileira a calibração no juiz. Espera o relatório e imprime o `moj check`. `--no-wait` não espera. O problema continua privado. Atenção: cada chamada dispara uma calibração nova. Para só consultar, use `moj status` ou `moj check`. | `moj validate apc#vetor1` |
-| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publica ou despublica. Publicar faz o servidor validar e calibrar. A org precisa permitir público. | `moj publish apc#vetor1` |
+| `moj validate [<id>] [--no-wait]` | Roda o portão de qualidade sem publicar. Confere o pacote (estático: enunciado, exemplos, testes, presença da `good`). Enfileira a calibração no juiz, que roda as soluções. Espera o relatório e imprime o `moj check`. `--no-wait` não espera. O problema continua privado. Atenção: cada chamada dispara uma calibração nova. Para só consultar, use `moj status` ou `moj check`. | `moj validate apc#vetor1` |
+| `moj public [<id>] on\|off [--yes]` · `moj publish [<id>] [--yes]` | Publica ou despublica. Publicar faz o servidor conferir o pacote e calibrar. A org precisa permitir público. Se o problema ainda não está pronto, mostra as pendências e pede confirmação (`--yes` mostra e segue). | `moj publish apc#vetor1` |
 | `moj calibrate [<id>] [--hosts h1,h2\|--all-judges\|--per-cpu]` · `--judges` · `--all-stale` | Calibra o problema. `--hosts` usa os juízes citados. `--all-judges` usa todos online. `--per-cpu` usa um juiz por modelo de CPU. `--judges` lista o parque. `--all-stale` recalibra todos os seus problemas marcados como "precisa recalibrar". Repetir não duplica. | `moj calibrate --all-stale` |
-| `moj status [<id>]` · `moj check [<id>]` | Sem id: saúde do sistema. Com id: QA do problema: validação, TL por juiz, solução `good` sem TL. Mostra o aviso `TL OVERRIDE` quando o conf tem `TLOVERRIDE`. Mostra o porquê de "precisa recalibrar": data, checksums e commits. | `moj check apc#vetor1` |
-| `moj board` | Mostra o painel dos seus problemas: público, validado, calibrado e o que precisa de revisão. | `moj board` |
-| `moj calib [<id>]` | Mostra a calibração por extenso: cada juiz, cada solução, cada teste `{name,code,time,tl}`. Mostra `⏳ calibrando` quando há uma em voo (com o juiz e há quanto tempo) e marca `DESATUALIZADO` o juiz que calibrou outra versão do pacote. As soluções dele não são servidas: recalibre. `--json` imprime o JSON cru. | `moj --json calib apc#vetor1` |
+| `moj status [<id>]` · `moj check [<id>]` | Sem id: saúde do sistema. Com id: QA do problema: pacote (conferência estática), TL por juiz, solução `good` sem TL, soluções × categoria, entradas (validador) e a linha `pronto: SIM` ou as pendências. Mostra o aviso `TL OVERRIDE` quando o conf tem `TLOVERRIDE`. Mostra o porquê de "precisa recalibrar": data, checksums e commits. | `moj check apc#vetor1` |
+| `moj board` | Mostra o painel dos seus problemas: público, pacote, calibrado, soluções, pronto e o que precisa de revisão. | `moj board` |
+| `moj calib [<id>]` | Mostra a calibração por extenso: cada juiz, cada solução, cada teste `{name,code,time,tl}`. Cada solução vem com o juízo do servidor (`✓ conforme`, `≈ conforme, outro motivo`, `✗ DIVERGENTE`, `✗ NÃO RODOU`) e a linha "esperado; obtido". Mostra também as entradas que o validador reprovou. Mostra `⏳ calibrando` quando há uma em voo (com o juiz e há quanto tempo) e marca `DESATUALIZADO` o juiz que calibrou outra versão do pacote. As soluções dele não são servidas: recalibre. `--json` imprime o JSON cru. | `moj --json calib apc#vetor1` |
 | `moj calib-report [<id>] [--host <juiz> --sol <nome>] [-o out.html]` | Baixa o `report.html` de uma solução da calibração. Sem `--host` e `--sol`, lista os disponíveis. | `moj calib-report apc#vetor1` |
 | `moj testrun [<id\|dir>] <arquivo> [--report out.html] [--no-wait]` | Roda uma solução avulsa no juiz, com a jaula e o TL da submissão real. Não entra no history nem no placar. Exige permissão de edição. | `moj testrun apc#vetor1 sol.cpp` |
 | `moj testrun-status <run> [--report out.html]` | Consulta um testrun já enfileirado. | `moj testrun-status 1f3a…` |
@@ -363,9 +363,12 @@ compartilhar problemas existentes funciona para dono e colaborador.
 
 `moj push` faz o pré-voo local: título, enunciado, ao menos um exemplo e uma solução `good`. O
 portão autoritativo roda no servidor. `moj publish` (igual a `moj public [<id>] on`) faz o servidor
-validar e calibrar. Validar confere HTML, exemplos e a solução `good`. Calibrar faz um juiz rodar
-as soluções `good` e reportar o TL. O problema entra no treino livre só se o portão passar.
-Acompanhe com `moj check [<id>]`.
+conferir o pacote e calibrar. Conferir o pacote é estático: HTML, exemplos, testes emparelhados e a
+presença da solução `good` (não roda nada). Calibrar faz um juiz rodar TODAS as soluções: as `good`
+medem o TL, e cada solução é conferida contra a categoria dela (tabela em `cdmoj/docs/PACOTE.md` §10).
+O problema entra no treino livre quando a conferência do pacote passa. Se ele ainda não está
+**pronto** (pacote, calibração, soluções, entradas), a publicação mostra as pendências e pede
+confirmação. Acompanhe com `moj check [<id>]`: a última linha diz `pronto: SIM` ou o que falta.
 
 **Título obrigatório.** `moj push` recusa enviar sem título. Um `.title` vazio no `.moj-id` ou o
 placeholder do `moj new` contam como sem título. Sem o título, o problema ficaria com o nome da
