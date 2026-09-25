@@ -79,7 +79,8 @@
 #   moj-contest -c <cid> machines [--round <slug>] [--csv]
 #       Mostra time × IP × User-Agent da rodada. No aquecimento os times ligam as máquinas.
 #   moj-contest -c <cid> docs ls | gen [info|caderno|times|editorial…] [--lang pt|en|es|both|all]
-#                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html] [-o arq]
+#                       | get <info|caderno|times|all> [--lang …] [--fmt pdf|html|odt] [-o arq]
+#                         (--fmt odt = o .odt EDITÁVEL do gerado — só .admin/.cjudge; ajuste e suba o PDF com upload)
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
 #                       | upload <tipo> <doc.pdf> [--lang pt]   (PDF pronto vence o gerado; --rm volta)
@@ -438,13 +439,14 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       api POST "/contest/admin/docs$(qc)" "$(jq -cn --argjson t "$types" --argjson l "$langs" '{action:"generate",types:$t,langs:$l}')" \
         | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang)|join(", ")))" else "" end)"';;
     get|download)
-      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|es|both|all] [--fmt pdf|html] [-o arquivo]"
+      [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|es|both|all] [--fmt pdf|html|odt] [-o arquivo]"
       local what="$1" fmt=pdf outf="" langs=(pt) a; shift
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in
           --lang) case "$1" in both|ambos) langs=(pt en);; all|todos) langs=(pt en es);;
                     *) langs=("$(_doc_lang "$1")");; esac; shift;;
-          --fmt) [[ "$1" == pdf || "$1" == html ]] || die "fmt deve ser pdf ou html"; fmt="$1"; shift;;
+          # odt = o intermediário editável do PDF gerado (só a organização baixa: a API dá 403 aos demais)
+          --fmt) [[ "$1" == pdf || "$1" == html || "$1" == odt ]] || die "fmt deve ser pdf, html ou odt"; fmt="$1"; shift;;
           -o|--out) outf="$1"; shift;;
           *) die "opção desconhecida: $a";;
         esac
