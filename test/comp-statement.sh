@@ -86,9 +86,9 @@ echo ""; echo "== samples A: arquivos .in/.out com bytes exatos =="
 run prova samples A > "$T/out" || true
 chk "samples/A/sample1.in e sample2.out (bytes exatos, com a quebra final)" 'printf "1 2\n" | cmp -s - "$T/work/samples/A/sample1.in" && printf "5\n" | cmp -s - "$T/work/samples/A/sample2.out"'
 chk "mensagem: 2 pares em samples/A"       'grep -q "2 par(es) em ./samples/A/" "$T/out"'
-echo "== samples B: sem exemplos como arquivo (aviso, rc 0) =="
+echo "== samples B: sem exemplos para baixar (aviso, rc 0) =="
 run prova samples B > "$T/out" || true
-chk "rc 0 e aviso"                         '[[ "$(cat "$T/rc")" == 0 ]] && grep -q "sem exemplos como arquivo" "$T/out" && [[ ! -e "$T/work/samples/B/sample1.in" ]]'
+chk "rc 0 e aviso"                         '[[ "$(cat "$T/rc")" == 0 ]] && grep -q "sem exemplos para baixar" "$T/out" && [[ ! -e "$T/work/samples/B/sample1.in" ]]'
 echo "== samples --dir =="
 run prova samples A --dir "$T/work/ex" > "$T/out" || true
 chk "grava na pasta pedida"                '[[ -s "$T/work/ex/A/sample1.out" ]]'
