@@ -53,6 +53,14 @@
 #       compartilhamento: sem --apply mostra a PRÉVIA (nada é gravado); com --apply converte em contas
 #       PRÓPRIAS — senhas NOVAS, histórico e placar ficam, cada time vira UMA conta. Pede "sim" antes da
 #       prova e o id do contest depois do início. Sem volta. --csv grava as credenciais (só você lê).
+#   moj-contest -c <cid> regions show | get [arq] | set <arq.json> [--dry-run] [--mode simple|rules|tree]
+#                       | who <login> | assign <login> <sede> | assign --csv <arq> [--dry-run]
+#                       | unassign <login> | map [--csv]
+#       Sedes pela regra única do servidor. A sede GRAVADA vence; senão a regex mais funda casa o login.
+#       Pai = soma dos filhos. Recorte (`view`) nunca é sede. `set` confere a regex (subconjunto seguro)
+#       e recusa se alguém mudou as sedes desde o seu `get`. `--dry-run` mostra o que muda sem gravar.
+#       `assign` num membro de time grava no TIME. Inscrito fica no roster (sobrevive à inscrição).
+#       CSV de `assign --csv`: uma linha `login,sede` (sede vazia = tira).
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
@@ -467,6 +475,57 @@ users_convert(){ local apply=0 logout=false csv="" a
   fi
   jq -r '[.credentials[] | select(.kind == "member_disabled") | .login] | select(length > 0) | "membros desabilitados (entram pelo time): " + join(" ")' <<<"$resp"
 }
+# regions — sedes (GET/POST /contest/admin/regions)
+_rg_show(){ jq -r '
+  .summary as $s
+  | "logins: \($s.logins) · gravada \($s.counts.explicit) · órfã \($s.counts.orphan) · regex \($s.counts.regex) · parou no pai \($s.counts.stopped) · sem sede \($s.counts.none)",
+    ($s.nodes[] | ("  " * (.depth + 1)) + .name + (if .view then "  [recorte]" else "" end) + (if .orphan then "  [órfã: nome gravado fora da árvore]" else "" end)
+                  + (if .err then "  ⚠ regex recusada (\(.err))" else "" end) + "  — \(.members)"),
+    (if ($s.stopped | length) > 0 then "parou no pai: " + ($s.stopped | join(" ")) else empty end),
+    (if ($s.none | length) > 0 then "sem sede: " + ($s.none | join(" ")) else empty end)'; }
+_rg_post(){  # <json> — POST; 422/409 mostram o porquê (nó e código) e morrem
+  local tmp rf rc=0; tmp="$(mktemp)"; rf="$(mktemp)"; printf '%s' "$1" > "$tmp"
+  API_SOFT=1 api_post_file "/contest/admin/regions$(qc)" "$tmp" > "$rf" 2>/dev/null || rc=$?
+  local out; out="$(cat "$rf")"; rm -f "$tmp" "$rf"
+  if (( rc != 0 )); then
+    jq -r '.error.nodes[]? | "  ⚠ \(.path): \(.err)   regex: \(.regex)"' <<<"${API_LAST_BODY:-}" >&2 2>/dev/null
+    API_SOFT=0 _api_fail "${API_LAST_CODE:-}" "${API_LAST_BODY:-}"; return 1
+  fi
+  printf '%s' "$out"; }
+cmd_regions(){ need_contest; need_login; local sub="${1:-show}"; shift || true
+  case "$sub" in
+    show) local r; r="$(api GET "/contest/admin/regions$(qc)")" || exit 1
+      [[ "$RAW" == 1 ]] && { printf '%s\n' "$r"; return 0; }; _rg_show <<<"$r";;
+    get) local r; r="$(api GET "/contest/admin/regions$(qc)")" || exit 1
+      if [[ -n "${1:-}" ]]; then jq '.tree' <<<"$r" > "$1" && echo "árvore em $1 (sig $(jq -r .sig <<<"$r"))"; else jq '.tree' <<<"$r"; fi;;
+    set) [[ $# -ge 1 && -f "$1" ]] || die "uso: regions set <arq.json> [--dry-run] [--mode simple|rules|tree]"
+      local f="$1" dry=false mode="" a sig r; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --dry-run) dry=true;; --mode) mode="${1:-}"; shift || true;; *) die "opção: $a";; esac; done
+      jq -e 'type == "array"' "$f" >/dev/null 2>&1 || die "$f não é uma lista JSON de sedes"
+      sig="$(api GET "/contest/admin/regions$(qc)" | jq -r .sig)" || exit 1
+      r="$(_rg_post "$(jq -c --argjson d "$dry" --arg s "$sig" --arg m "$mode" '{tree:., dry_run:$d, expect_sig:$s} + (if $m != "" then {mode:$m} else {} end)' "$f")")" || exit 1
+      [[ "$RAW" == 1 ]] && { printf '%s\n' "$r"; return 0; }
+      [[ "$dry" == true ]] && echo "(prévia — nada foi gravado)" || echo "gravado (sig $(jq -r .sig <<<"$r"))"
+      _rg_show <<<"$r";;
+    who) [[ $# -ge 1 ]] || die "uso: regions who <login>"
+      api GET "/contest/admin/regions$(qc)&login=$(enc "$1")" | out '"\(.login): \(if .site then .site.name else "(sem sede)" end)  [\({"x":"gravada","o":"gravada, fora da árvore","r":"regex","p":"regex, parou no pai","-":"—"}[.flag] // .flag)]\n  nós: \([.nodes[] | .name + (if .view then " (recorte)" else "" end)] | join(" · "))"';;
+    assign|unassign)
+      local lines="" dry=false a
+      if [[ "$sub" == assign && "${1:-}" == --csv ]]; then
+        [[ -f "${2:-}" ]] || die "uso: regions assign --csv <arq> [--dry-run]   (linhas login,sede)"
+        lines="$(tr -d '\r' < "$2" | awk -F, 'NF >= 1 && $1 !~ /^ *(login)? *$/ { l = $1; $1 = ""; r = substr($0, 2); gsub(/^ +| +$/, "", l); gsub(/^ +| +$/, "", r); print l "\t" r }')"
+        shift 2; for a in "$@"; do [[ "$a" == --dry-run ]] && dry=true; done
+      elif [[ "$sub" == assign ]]; then [[ $# -ge 2 ]] || die "uso: regions assign <login> <sede>"; lines="$(printf '%s\t%s' "$1" "$2")"
+      else [[ $# -ge 1 ]] || die "uso: regions unassign <login>"; lines="$(printf '%s\t' "$1")"; fi
+      local r; r="$(_rg_post "$(jq -Rsc --argjson d "$dry" '{dry_run:$d, assign:[split("\n")[] | select(length > 0) | split("\t") | {login:.[0], region:(.[1] // "")}]}' <<<"$lines")")" || exit 1
+      [[ "$RAW" == 1 ]] && { printf '%s\n' "$r"; return 0; }
+      [[ "$dry" == true ]] && { echo "(prévia — nada foi gravado)"; _rg_show <<<"$r"; }
+      jq -r '((.assigned // [])[] | "  ✓ \(.login)\(if .target != .login then " → time \(.target)" else "" end)"), ((.failed // [])[] | "  ✗ \(.login): \(.code)")' <<<"$r";;
+    map) local r; r="$(api GET "/contest/admin/regions$(qc)&map=1")" || exit 1
+      if [[ "${1:-}" == --csv ]]; then jq -r '"login,sede,como", (.map[] | [.login, (.site // ""), .flag] | @csv)' <<<"$r"
+      else jq -r '.map[] | "\(.login)\t\(.site // "—")\t\(.flag)"' <<<"$r" | { column -t -s$'\t' 2>/dev/null || cat; }; fi;;
+    *) die "regions: sub desconhecido '$sub' (show|get|set|who|assign|unassign|map)";;
+  esac; }
 cmd_sessions(){ need_contest; need_login
   api GET "/contest/admin/sessions$(qc)" | out '.sessions[]? | "\(.login)\t\(.ip//"")\t\(.login_at|todate)\t\(if .multi_ip or .multi_ua then "⚠" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_dashboard(){ need_contest; need_login
@@ -992,7 +1051,7 @@ case "$cmd" in
   remove) cmd_remove "$@";;
   settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
   modules|modulos|mod) cmd_modules "$@";;
-  problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";;
+  problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";; regions|sedes) cmd_regions "$@";;
   sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
   report) cmd_report "$@";;
   audit) cmd_audit "$@";; access) cmd_access "$@";; news) cmd_news "$@";;
