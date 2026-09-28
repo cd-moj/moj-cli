@@ -85,7 +85,7 @@
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
 #                       | logo <imagem> | logo --rm   (logo no topo das páginas do caderno/editorial e na capa)
 #                       | upload <tipo> <doc.pdf> [--lang pt]   (PDF pronto vence o gerado; --rm volta)
-#                       | set caderno_version=v1.2 [errata=…] [cover_note=…]
+#                       | set caderno_version=v1.2 [errata=…] [cover_note=…] [samples_table=true|false]
 #                       | text <info|capa> [--lang pt] [--show | --from arq|- | --reset]
 #       Documentos da prova: info sheet, caderno e folha de time limits, em PDF e HTML, pt/en/es.
 #       ls e get funcionam com qualquer conta do contest e mostram só o publicado.
@@ -535,13 +535,18 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         rm -f "$tmp"
       fi;;
     set)
-      [[ $# -ge 1 ]] || die "uso: docs set caderno_version=v1.2 [errata=…] [cover_note=…]"
+      [[ $# -ge 1 ]] || die "uso: docs set caderno_version=v1.2 [errata=…] [cover_note=…] [samples_table=true|false]"
       local body='{}' kv k v
       for kv in "$@"; do
         k="${kv%%=*}"; v="${kv#*=}"; [[ "$k" != "$kv" ]] || die "esperado k=v: $kv"
         case "$k" in
           caderno_version|errata|cover_note) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
-          *) die "campo desconhecido: $k (caderno_version|errata|cover_note)";;
+          # exemplos do caderno em tabela "entrada | saída" (opt-in; padrão = empilhados)
+          samples_table)
+            case "$v" in true|1|sim|yes|on) v=true;; false|0|nao|não|no|off) v=false;;
+              *) die "samples_table=true|false";; esac
+            body="$(jq -c --argjson v "$v" '.samples_table=$v' <<<"$body")";;
+          *) die "campo desconhecido: $k (caderno_version|errata|cover_note|samples_table)";;
         esac
       done
       api POST "/contest/admin/docs$(qc)" "$(jq -c '. + {action:"config"}' <<<"$body")" | out '"salvo"';;
