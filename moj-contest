@@ -45,8 +45,14 @@
 #                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
 #                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
 #   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
-#                       | rm <login> | disable <login> | logout <login>
+#                       | rm <login> | disable <login> [--undo] | logout <login>
 #                       | set-password-all <senha> [--include-disabled]
+#                       | convert [--apply] [--logout-all] [--csv ARQ]
+#       Contest COMPARTILHADO (usuários do Treino Livre): `ls` marca quem entra pela conta do treino
+#       (🔗treino); `disable --undo` reabilita um compartilhado desabilitado. `convert` = desfazer o
+#       compartilhamento: sem --apply mostra a PRÉVIA (nada é gravado); com --apply converte em contas
+#       PRÓPRIAS — senhas NOVAS, histórico e placar ficam, cada time vira UMA conta. Pede "sim" antes da
+#       prova e o id do contest depois do início. Sem volta. --csv grava as credenciais (só você lê).
 #   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
@@ -189,7 +195,13 @@ cmd_create(){ need_login_t
   [[ "$(jq -r '.end // empty' <<<"$spec")" ]] || die "faltou o fim: --end <epoch> (ou spec/template com end/duration)"
   local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
   CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
-  rm -f "$tmp"; }
+  rm -f "$tmp"
+  # usuários COMPARTILHADOS do treino: as consequências que ninguém adivinha (o assistente da web pede "Entendi")
+  if [[ -n "$(jq -r '.users_from // empty' <<<"$spec")" ]]; then
+    printf '%s\n' "⚠ usuários COMPARTILHADOS do treino: login e senha são os do Treino Livre (você não vê nem redefine;" \
+      "  etiquetas sem senha); qualquer conta de lá entra se a inscrição estiver desligada; juiz/staff = contas" \
+      "  próprias (users add). Para prova: moj-contest -c <id> users convert (prévia) e --apply — sem volta." >&2
+  fi; }
 cmd_list(){ need_login_t
   api_t GET "/treino/contest-create/mine" | out '.contests[]? | "\(.id)\t\(.mode)\t\(.problems_count) probs\t\(.name)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_show(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest show <cid>"
@@ -361,7 +373,7 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   esac; }
 cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
-    ls) api GET "/contest/admin/users$(qc)" | out '.users[]? | "\(.login)\t\(.fullname//"")\t\(if .admin then "admin" elif .disabled then "DESABILITADO" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    ls) api GET "/contest/admin/users$(qc)" | out '.users[]? | "\(.login)\t\(.fullname//"")\t\([(if .admin then "admin" elif .disabled then "DESABILITADO" else empty end), (if .disqualified then "DESCLASSIFICADO" else empty end), (if .shared then "🔗treino" else empty end)] | join(" "))"' | { column -t -s$'\t' 2>/dev/null || cat; };;
     add|reset) [[ $# -ge 1 ]] || die "uso: users $sub <login> [--pass P] [--name N] [--email E]"
       local login="$1" pw="" nm="" em="" a; shift
       while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --pass) pw="$1"; shift;; --name) nm="$1"; shift;; --email) em="$1"; shift;; *) die "opção: $a";; esac; done
@@ -370,8 +382,12 @@ cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         | out '"\(.user.login)  senha: \(.user.password)"';;
     rm|remove) [[ $# -ge 1 ]] || die "uso: users rm <login>"
       api POST "/contest/admin/user-remove$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"removido: \(.login)"';;
-    disable) [[ $# -ge 1 ]] || die "uso: users disable <login>"
-      api POST "/contest/admin/user-disable$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"desabilitado: \(.login) (\(.sessions_removed) sessão(ões) derrubadas)"';;
+    disable) [[ $# -ge 1 ]] || die "uso: users disable <login> [--undo]"
+      if [[ "${2:-}" == --undo ]]; then
+        api POST "/contest/admin/user-disable$(qc)" "$(jq -cn --arg l "$1" '{login:$l, undo:true}')" | out '"reabilitado: \(.login) (volta a entrar com a senha do treino)"'
+      else
+        api POST "/contest/admin/user-disable$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"desabilitado: \(.login) (\(.sessions_removed) sessão(ões) derrubadas)"'
+      fi;;
     logout) [[ $# -ge 1 ]] || die "uso: users logout <login>"
       api POST "/contest/admin/logout-user$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"sessões removidas: \(.sessions_removed)"';;
     set-password-all) [[ $# -ge 1 ]] || die "uso: users set-password-all <senha> [--include-disabled]"
@@ -380,8 +396,77 @@ cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       local c; read -rp "trocar a senha de TODOS os não-privilegiados de '$CONTEST'? (digite sim) " c || true
       [[ "$c" == sim ]] || die "abortado."
       api POST "/contest/admin/users-set-password$(qc)" "$(jq -cn --arg p "$pw" --argjson i "$inc" '{password:$p,include_disabled:$i}')" | out '"atualizados: \(.count)"';;
-    *) die "users: sub desconhecido '$sub' (ls|add|reset|rm|disable|logout|set-password-all)";;
+    convert) users_convert "$@";;
+    *) die "users: sub desconhecido '$sub' (ls|add|reset|rm|disable|logout|set-password-all|convert)";;
   esac; }
+# users convert — contas compartilhadas (USERS_FROM) → contas PRÓPRIAS (POST /contest/admin/users-convert)
+_uc_print_preview(){ jq -r '
+  def aviso: {live:"a prova já começou: quem está logado continua; quem sair precisa da senha NOVA",
+              team_members_lose_login:"cada time vira UMA conta (login time-…) com senha única; os membros deixam de entrar com as contas deles",
+              member_history_disabled:"membros de time que já submeteram viram contas desabilitadas (a linha do placar fica)",
+              new_scoreboard_rows:"quem entrou sem submeter passa a aparecer zerado no placar",
+              never_entered_excluded:"quem nunca entrou neste contest não ganha conta (users add depois)",
+              registration_closes:"a inscrição é encerrada e o roster, arquivado",
+              superadmins_lose_access:"os superadmins do treino deixam de entrar neste contest",
+              admin_local_created:"o admin ganha conta própria com senha NOVA (a do treino deixa de valer aqui)"}[.] // .;
+  .counts as $c
+  | "contest \(.contest) — fase: \(.phase) · sessões abertas: \(.sessions_live) · inscrição: \(if .registration then "sim" else "não" end)",
+    "  \($c.individuals) participante(s) ganham conta própria (\($c.from.dir) com pasta · \($c.from.session) sessão · \($c.from.access_log) log de acessos · \($c.from.registration) inscritos)",
+    "  \($c.teams) time(s) — uma conta cada; \($c.members_losing_login) membro(s) passam a entrar pelo time; \($c.members_with_history) membro(s) com submissão ficam desabilitados",
+    (if .admin then "  admin: \(.admin) ganha conta local com senha NOVA" else empty end),
+    (if $c.resumed > 0 then "  \($c.resumed) já convertida(s) numa tentativa anterior (senha nas etiquetas)" else empty end),
+    (.warnings[] | "  ⚠ " + aviso),
+    "plan_id: \(.plan_id)"'; }
+# pergunta no terminal; sem terminal (script), lê a resposta do stdin — que é explícita do mesmo jeito
+_uc_ask(){ local c=""
+  if { : </dev/tty; } 2>/dev/null; then read -rp "$1" c </dev/tty || true
+  else printf '%s' "$1" >&2; read -r c || true; fi
+  printf '%s' "$c"; }
+users_convert(){ local apply=0 logout=false csv="" a
+  while [[ $# -gt 0 ]]; do a="$1"; shift
+    case "$a" in --apply) apply=1;; --logout-all) logout=true;; --csv) csv="${1:-}"; shift || true; [[ -n "$csv" ]] || die "--csv espera um arquivo";; *) die "opção: $a";; esac
+  done
+  local r pv; r="$(api POST "/contest/admin/users-convert$(qc)" '{"dry_run":true}')" || exit 1
+  pv="$(jq -c .preview <<<"$r")"
+  [[ "$RAW" == 1 && "$apply" == 0 ]] && { printf '%s\n' "$r"; return 0; }
+  _uc_print_preview <<<"$pv"
+  [[ "$apply" == 1 ]] || { echo; echo "(prévia — nada foi gravado. Para converter: users convert --apply)"; return 0; }
+  local phase pid cf c; phase="$(jq -r .phase <<<"$pv")"; pid="$(jq -r .plan_id <<<"$pv")"
+  echo
+  if [[ "$phase" == before ]]; then
+    c="$(_uc_ask "converter '$CONTEST' em contas próprias? NÃO tem volta. (digite sim) ")"
+    [[ "$c" == sim ]] || die "abortado."; cf=true
+  else
+    c="$(_uc_ask "a prova JÁ COMEÇOU. Digite o id do contest ($CONTEST) para confirmar: ")"
+    [[ "$c" == "$CONTEST" ]] || die "abortado."; cf="$(jq -cn --arg c "$c" '$c')"
+  fi
+  local tmp rf resp rc=0; tmp="$(mktemp)"; rf="$(mktemp)"
+  jq -cn --arg p "$pid" --argjson cf "$cf" --argjson lo "$logout" '{dry_run:false, plan_id:$p, confirm:$cf, logout_all:$lo}' > "$tmp"
+  # fora de $(…): o API_LAST_BODY do 409 tem de chegar a este shell (ver o push do `moj`)
+  API_SOFT=1 api_post_file "/contest/admin/users-convert$(qc)" "$tmp" > "$rf" 2>/dev/null || rc=$?
+  resp="$(cat "$rf")"; rm -f "$tmp" "$rf"
+  if (( rc != 0 )); then
+    if [[ "$(jq -r '.error.code // empty' <<<"${API_LAST_BODY:-}" 2>/dev/null)" == plan_changed ]]; then
+      echo "a lista de contas MUDOU desde a prévia (alguém entrou ou se inscreveu) — a prévia nova:" >&2
+      jq -c '.error.preview' <<<"$API_LAST_BODY" | _uc_print_preview >&2
+      die "nada foi gravado; confira e rode de novo."
+    fi
+    API_SOFT=0 _api_fail "${API_LAST_CODE:-}" "${API_LAST_BODY:-}"; return 1
+  fi
+  [[ "$RAW" == 1 ]] && { printf '%s\n' "$resp"; return 0; }
+  jq -r '"convertido: \([.credentials[] | select(.password)] | length) conta(s) com senha nova · sessões encerradas: \(.sessions_removed)"
+         + (if .registrations_archived then "\nroster arquivado em \(.registrations_archived)" else "" end)' <<<"$resp"
+  jq -r '.credentials[] | select(.kind == "admin" and .password) | "⚠ sua senha de admin agora é \(.password) (\(.login)) — a do treino não vale mais aqui"' <<<"$resp"
+  if [[ -n "$csv" ]]; then
+    ( umask 077; jq -r '["login","senha","nome","tipo"], (.credentials[] | select(.password) | [.login, .password, .fullname, .kind]) | @csv' <<<"$resp" > "$csv" ) \
+      || die "não consegui gravar $csv"
+    echo "credenciais em $csv (só você lê). Etiquetas: $MOJ_URL/contest/badges/?c=$(enc "$CONTEST")"
+  else
+    echo "credenciais (só aparecem agora; depois, nas etiquetas: $MOJ_URL/contest/badges/?c=$(enc "$CONTEST")):"
+    jq -r '.credentials[] | select(.password) | "\(.login)\t\(.password)\t\(.fullname // "")"' <<<"$resp" | { column -t -s$'\t' 2>/dev/null || cat; }
+  fi
+  jq -r '[.credentials[] | select(.kind == "member_disabled") | .login] | select(length > 0) | "membros desabilitados (entram pelo time): " + join(" ")' <<<"$resp"
+}
 cmd_sessions(){ need_contest; need_login
   api GET "/contest/admin/sessions$(qc)" | out '.sessions[]? | "\(.login)\t\(.ip//"")\t\(.login_at|todate)\t\(if .multi_ip or .multi_ua then "⚠" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_dashboard(){ need_contest; need_login
