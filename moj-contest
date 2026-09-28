@@ -83,6 +83,7 @@
 #                         (--fmt odt = o .odt EDITÁVEL do gerado — só .admin/.cjudge; ajuste e suba o PDF com upload)
 #                       | publish <tipo> [--lang pt] [--news] | unpublish <tipo> [--lang pt]
 #                       | cover <capa.pdf> [--lang pt] | cover --rm [--lang pt]
+#                       | logo <imagem> | logo --rm   (logo no topo das páginas do caderno/editorial e na capa)
 #                       | upload <tipo> <doc.pdf> [--lang pt]   (PDF pronto vence o gerado; --rm volta)
 #                       | set caderno_version=v1.2 [errata=…] [cover_note=…]
 #                       | text <info|capa> [--lang pt] [--show | --from arq|- | --reset]
@@ -496,6 +497,21 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"capa enviada ('"$l"'): \(.bytes) bytes — gere o caderno de novo"'
         rm -f "$tmp"
       fi;;
+    logo)
+      # docs logo <imagem> | docs logo --rm — a faixa de logos no TOPO de cada página do caderno/editorial
+      # e na capa gerada (PNG/JPEG/WebP/SVG até 5MB; o servidor reprocessa); vale p/ os três idiomas
+      [[ $# -ge 1 ]] || die "uso: docs logo <imagem.png|jpg|webp|svg>   (ou --rm)"
+      if [[ "$1" == --rm || "$1" == --remove ]]; then
+        api POST "/contest/admin/docs$(qc)" '{"action":"logo","remove":true}' | out '"logo removido — gere o caderno de novo"'
+      else
+        [[ -f "$1" ]] || die "arquivo não encontrado: $1"
+        local tmp; tmp="$(mktemp)"
+        local b64; b64="$(_b64tmp "$1")" || die "não consegui codificar $1"
+        jq -cn --rawfile b "$b64" '{action:"logo",image_b64:($b|rtrimstr("\n"))}' > "$tmp"
+        rm -f "$b64"
+        api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"logo enviado: \(.bytes) bytes (PNG) — gere o caderno de novo"'
+        rm -f "$tmp"
+      fi;;
     upload|up)
       # docs upload <tipo> <arquivo.pdf> [--lang pt]  |  docs upload <tipo> --rm [--lang pt]
       # sobe o PDF PRONTO daquele tipo+idioma: VENCE o gerado em tudo que é servido; --rm volta.
@@ -557,7 +573,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
           [[ "$src" == - ]] && rm -f "$srcf"
           api_post_file "/contest/admin/docs$(qc)" "$tmp" | out '"texto '"$key"' salvo"'; rm -f "$tmp";;
       esac;;
-    *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|upload|set|text)";;
+    *) die "docs: sub desconhecido '$sub' (ls|gen|get|publish|unpublish|cover|logo|upload|set|text)";;
   esac; }
 
 # ---- rodadas (aquecimento -> prova oficial no MESMO contest) --------------------------------
