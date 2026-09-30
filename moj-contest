@@ -372,15 +372,23 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       [[ "$inc" == 1 ]] && qs+="&include_private=1"
       local r; r="$(api GET "/contest/admin/draw$(qc)&$qs")"
       jq -r '"sorteados \(.drawn) de \(.candidates) candidatos (seed \(.seed))"' <<<"$r" >&2
-      [[ "$inc" == 1 ]] && jq -e '.private_included == false' >/dev/null 2>&1 <<<"$r" \
-        && echo "aviso: o contest não tem dono registrado — sorteio só com públicos" >&2
+      # o opt-in só vale se o servidor CONFIRMA: false = contest sem dono; ausente = servidor sem o
+      # include_private (anterior a 30/09/2026), que ignora o parâmetro calado
+      if [[ "$inc" == 1 ]]; then
+        case "$(jq -r '.private_included | tostring' <<<"$r" 2>/dev/null)" in
+          true) ;;
+          false) echo "aviso: o contest não tem dono registrado — sorteio só com públicos" >&2;;
+          *) echo "aviso: o servidor não reconhece --include-private — sorteio só com públicos" >&2;;
+        esac
+      fi
       if [[ "$doadd" == 1 ]]; then
-        local pid nm
-        while IFS=$'\t' read -r pid nm; do
+        local pid nm priv
+        # o 🔒 é da TELA: vai num 3º campo, nunca no nome gravado no contest
+        while IFS=$'\t' read -r pid nm priv; do
           [[ -n "$pid" ]] || continue
           api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$pid" --arg nm "$nm" '{action:"add",problem:{bank_id:$id,name:$nm}}')" >/dev/null
-          echo "  + $pid ($nm)"
-        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)\(if .private then " 🔒" else "" end)"' <<<"$r")
+          echo "  + $pid ($nm)${priv:+ $priv}"
+        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)\t\(if .private then "🔒" else "" end)"' <<<"$r")
       else
         printf '%s' "$r" | out '.problems[]? | "\(.id)\(if .private then " 🔒" else "" end)\t\(.bucket)\t\(.title)\t\(if (.collections//[])|length>0 then .collections|join(",") else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }
       fi;;
