@@ -71,12 +71,14 @@ cmd_show(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges show <host>"
   m="$(jq -c --arg h "$h" '.machines[] | select(.host == $h)' <<<"$j")"
   [[ -n "$m" ]] || die "juiz desconhecido: $h (veja 'moj-judges ls')"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$m"; return; }
-  jq -r '
+  local pol; pol="$(jq -c '.policy // {}' <<<"$j")"; [[ -n "$pol" ]] || pol='{}'
+  jq -r --argjson pol "$pol" "$JQ_JOB_WIDTH"'
     "host:      \(.host)  \(if .online then "🟢 online" else "🔴 offline" end)\(if .status == "draining" then "  ⏸ DRENANDO (config nova a aplicar)" elif .status == "disabled" then "  ⏸ DESABILITADO" else "" end)",
     "slots:     \((.slots.total // 1) - (.slots.free // (.slots.total // 1))) ocupado(s) de \(.slots.total // 1)  (partition \(.partition // "off")\(if .slots.cpus then "; \(.slots.cpus) cpu(s) por slot" else "; agente antigo: sem largura" end)\(if .slots.smt then "; SMT" else "" end))",
     "por nó:    \(.slots.by_node // {} | if length > 0 then (to_entries | map("nó \(.key): \(.value) slot(s)") | join("  ")) else "—" end)\(if .slots.max_free_group != null then "  (maior grupo livre agora: \(.slots.max_free_group))" else "" end)",
     "hold:      \(if .hold and .hold.job then "⏳ SEGURADO p/ o job \(.hold.job) (\(.hold.k_slots) slots\(if .hold.numa then ", mesmo nó NUMA" else "" end); nada novo entra até caber)" else "—" end)",
     "config:    \(if .config then (.config | "partition \(.partition // "off")  reserve \(.reserve // 0)  parallel_max \(.parallel_max // 4)  \(if .disabled then "⛔ DESABILITADO" else "habilitado" end)  (por \(.by // "?"))") else "(default: off; parallel_max 4)" end)",
+    "paralelo:  \(if ($pol.parallel // "off") == "auto" then "política geral AUTO: sobra de slots vira testes em paralelo (colchão \($pol.cushion // 0.25), máx. por job \($pol.share_max // 0.5)); neste juiz até \(.config.parallel_max // 4) teste(s) por job" else "política geral OFF: todo job roda 1 teste por vez — o parallel_max só vale com \"moj-judges parallel auto\"" end)",
     "cpu:       \(.report.cpu // "?")  (\(.report.arch // "?"))",
     "memória:   \((.report.memory // 0) / 1048576 * 10 | floor / 10) GB",
     "gpu:       \(.report.gpu.names // "—")",
@@ -88,7 +90,7 @@ cmd_show(){ need_login; [[ $# -ge 1 ]] || die "uso: moj-judges show <host>"
     "fila:      \(.queued_calibrate // 0) calibração(ões) direcionada(s)",
     "rodando:   \(.current_jobs // [] | if length == 0 then "nada"
        else map("\(.kind) \(.problem_id // "?")\(if .login and .login != "" then " (\(.login))" else "" end)"
-                + (if (.slots // 1) > 1 then " [\(.slots) slots, \(.test_cpus // 1) cpu/teste\(if (.par_max // 1) > 1 then ", \(.par_max) testes por vez" else "" end)]" else "" end)
+                + jobwidth
                 + (if .since then " há \((now - .since) / 60 | floor)m" else "" end))
             | join(" · ") end)"
   ' <<<"$m"; }

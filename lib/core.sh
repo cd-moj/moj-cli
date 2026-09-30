@@ -252,3 +252,20 @@ enc(){ jq -rn --arg s "$1" '$s|@uri'; }
 slurp(){ [[ -f "$1" ]] && jq -Rs . < "$1" || printf '""'; }
 pause(){ read -rsp "  (enter p/ continuar) " _ </dev/tty; echo; }
 ask(){ local p="$1" def="${2:-}" v; read -e -i "$def" -r -p "$p" v </dev/tty || true; printf '%s' "$v"; }
+
+# JQ_JOB_WIDTH — `def jobwidth:` a LARGURA de um job em execução (current_jobs do /treino/admin/judges) em
+# palavras: testes ao mesmo tempo × slots por teste = slots ocupados. "[4 slots, 4 cpu/teste]" parecia 4
+# testes em paralelo; era 1 teste com as 4 CPUs juntas (CPUNEEDED=4 — relato de 30/09/2026). Vazio p/ job
+# de 1 slot. cpu_needed < test_cpus = CPUs a mais pela memória (MEMLIMITMB — o escalonador as reserva).
+# É o que o servidor CONCEDEU: par_max = testes por vez, test_cpus = CPUs de cada teste.
+JQ_JOB_WIDTH='def jobwidth:
+  ((.slots // 1) | tonumber? // 1) as $s | ((.par_max // 1) | tonumber? // 1) as $p
+  | ((.test_cpus // 1) | tonumber? // 1) as $c | ((.cpu_needed // 0) | tonumber? // 0) as $cn
+  | (if $p > 0 then (($s / $p) | round) else $s end) as $k
+  | (if .same_numa == true then ", mesmo nó NUMA" else "" end) as $nm
+  | if $s <= 1 and $c <= 1 then ""
+    else " [\($s) slots = "
+      + (if $p > 1 then "\($p) testes em paralelo × \($k) slots por teste (\($c) CPUs cada\($nm))"
+         else "1 teste por vez × \($k) slots (\($c) CPUs juntas\($nm))" end)
+      + (if $cn > 0 and $c > $cn then " — CPUNEEDED=\($cn); +\($c - $cn) CPU(s) pela memória" else "" end)
+      + "]" end;'
