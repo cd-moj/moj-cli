@@ -44,6 +44,7 @@
 #                       | judges <letra> <host1,host2|->   ('-' volta a herdar do contest)
 #                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
 #                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
+#                         [--include-private]   (soma os privados do DONO do contest; padrão: só públicos)
 #   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
 #                       | rm <login> | disable <login> [--undo] | logout <login>
 #                       | set-password-all <senha> [--include-disabled]
@@ -352,12 +353,13 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       local q="$1" col="" a; shift
       while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --collection) col="&collection=$(enc "$1")"; shift;; *) die "opção: $a";; esac; done
       api GET "/contest/admin/bank$(qc)&q=$(enc "$q")$col" | out '.problems[]? | "\(.id)\t\(.title)\t\(if (.collections//[])|length>0 then "📁 " + (.collections|join(",")) else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
-    draw) local tags="" colls="" count=6 diff=any match=any seed="" doadd=0 a
+    draw) local tags="" colls="" count=6 diff=any match=any seed="" doadd=0 inc=0 a
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in
           --tags) tags="$1"; shift;; --collections) colls="$1"; shift;;
           --count) count="$1"; shift;; --difficulty) diff="$1"; shift;;
           --match) match="$1"; shift;; --seed) seed="$1"; shift;; --add) doadd=1;;
+          --include-private) inc=1;;
           *) die "opção: $a";;
         esac
       done
@@ -365,17 +367,30 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       [[ -n "$tags" ]] && qs+="&tags=$(enc "$tags")"
       [[ -n "$colls" ]] && qs+="&collections=$(enc "$(jq -cn --arg v "$colls" '$v|split(",")|map(select(length>0))')")"
       [[ -n "$seed" ]] && qs+="&seed=$(enc "$seed")"
+      # privados só com opt-in: sortear por tag/coleção pode puxar a prova em elaboração de um
+      # colega da org (o servidor usa os privados do DONO do contest; sem dono = só públicos)
+      [[ "$inc" == 1 ]] && qs+="&include_private=1"
       local r; r="$(api GET "/contest/admin/draw$(qc)&$qs")"
       jq -r '"sorteados \(.drawn) de \(.candidates) candidatos (seed \(.seed))"' <<<"$r" >&2
+      # o opt-in só vale se o servidor CONFIRMA: false = contest sem dono; ausente = servidor sem o
+      # include_private (anterior a 30/09/2026), que ignora o parâmetro calado
+      if [[ "$inc" == 1 ]]; then
+        case "$(jq -r '.private_included | tostring' <<<"$r" 2>/dev/null)" in
+          true) ;;
+          false) echo "aviso: o contest não tem dono registrado — sorteio só com públicos" >&2;;
+          *) echo "aviso: o servidor não reconhece --include-private — sorteio só com públicos" >&2;;
+        esac
+      fi
       if [[ "$doadd" == 1 ]]; then
-        local pid nm
-        while IFS=$'\t' read -r pid nm; do
+        local pid nm priv
+        # o 🔒 é da TELA: vai num 3º campo, nunca no nome gravado no contest
+        while IFS=$'\t' read -r pid nm priv; do
           [[ -n "$pid" ]] || continue
           api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$pid" --arg nm "$nm" '{action:"add",problem:{bank_id:$id,name:$nm}}')" >/dev/null
-          echo "  + $pid ($nm)"
-        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)"' <<<"$r")
+          echo "  + $pid ($nm)${priv:+ $priv}"
+        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)\t\(if .private then "🔒" else "" end)"' <<<"$r")
       else
-        printf '%s' "$r" | out '.problems[]? | "\(.id)\t\(.bucket)\t\(.title)\t\(if (.collections//[])|length>0 then .collections|join(",") else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }
+        printf '%s' "$r" | out '.problems[]? | "\(.id)\(if .private then " 🔒" else "" end)\t\(.bucket)\t\(.title)\t\(if (.collections//[])|length>0 then .collections|join(",") else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }
       fi;;
     *) die "problems: sub desconhecido '$sub' (ls|add|rm|rename|reorder|langs|search|draw)";;
   esac; }
