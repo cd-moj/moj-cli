@@ -44,6 +44,7 @@ declare -A GNU=(
   ['find .*-printf']='find -printf é GNU'
   ['xargs +-d']='xargs -d é GNU (use -0)'
   ['sort +-V']='sort -V é GNU'
+  ['date .*%N']='date +%N (nanossegundos) é GNU — no BSD sai um N literal; p/ tempo decorrido use $SECONDS'
 )
 # ⚠ o `||` que importa é o que vem DEPOIS da ferramenta, não o primeiro da linha: em
 # `… && printf '%s' "$v" || date -d "$v" … || die`, olhar o primeiro `||` acha o `printf` e

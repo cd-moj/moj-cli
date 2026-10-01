@@ -255,16 +255,22 @@ o servidor. Se forem iguais, ele grava a linha de base. Se forem diferentes, ele
 | `problems` · `score` · `news` | Lista problemas (com os idiomas do enunciado de cada um) · mostra o placar · mostra avisos. |
 | `statement <letra> [--lang en\|es]` | Baixa um enunciado. Sem `--lang`, todos os idiomas oferecidos. Com um idioma que a prova não oferece, a CLI recusa e lista os disponíveis. |
 | `samples <letra> [--dir pasta]` | Baixa os exemplos do enunciado como arquivos: `samples/<letra>/<nome>.in` e `.out`. `fetch` já faz isso para todos os problemas (pasta `samples/` do kit). Um enunciado enviado pronto pela organização não tem exemplos como arquivo: a CLI avisa. |
-| `submit <letra> <arquivo>` | Envia e espera o veredicto. |
+| `submit <letra> <arquivo> [--no-wait]` | Envia e espera o veredicto. Com `--no-wait`, envia e sai na hora. |
+| `wait [id…]` | Espera o veredicto das submissões pendentes. Sem id, espera todas. |
 | `subs` | Lista as suas submissões e veredictos. |
 | `clar ls` · `clar ask <letra\|geral> <texto>` | Lista e faz perguntas aos juízes. |
 | `time` · `doctor` · `update` | Compara o relógio · diagnostica · atualiza. |
 | `outbox` · `sync` · `monitor` | Mostra a fila offline · reenvia agora · vigia a queda de rede. |
 
+**Esperar o veredicto.** O `submit` espera até sair o veredicto, sem limite de tempo. Num terminal, uma linha
+mostra o tempo de espera. Depois de 60 s, a CLI avisa que está demorando. Para parar de esperar, aperte Ctrl-C. A
+submissão continua na fila do juiz. Para voltar a esperar, rode `moj-comp wait`. Para ver a lista, rode
+`moj-comp subs`.
+
 **Modo offline.** Quando `submit` não alcança o servidor, a CLI empacota a submissão. O pacote é
 cifrado com a chave pública do contest, recebida no login. O pacote leva o horário UTC corrente,
 corrigido pelo desvio medido do relógio. `moj-comp monitor` vigia a rede. Quando a rede volta, ele
-reenvia sozinho. A submissão conta no horário do carimbo. A rota é `/contest/offline-submit`. Um
+reenvia sozinho e, nas voltas seguintes, mostra os veredictos. A submissão conta no horário do carimbo. A rota é `/contest/offline-submit`. Um
 beacon assinado do servidor e a hora de chegada cercam o carimbo. Ver `cdmoj/docs/FLOW.md`, seção
 7½. O guia do competidor está em `/contest/cli.html` no servidor. Requisitos: `bash`, `curl`,
 `jq` e `openssl`.

@@ -257,16 +257,21 @@ the server. If they are equal, it records the baseline. If they differ, it refus
 | `problems` · `score` · `news` | Lists problems (with the statement languages of each one) · shows the scoreboard · shows announcements. |
 | `statement <letter> [--lang en\|es]` | Downloads one statement. Without `--lang`, every offered language. With a language the contest does not offer, the CLI refuses and lists the available ones. |
 | `samples <letter> [--dir folder]` | Downloads the statement samples as files: `samples/<letter>/<name>.in` and `.out`. `fetch` already does this for every problem (the kit's `samples/` folder). A statement uploaded ready-made by the organization has no samples as files: the CLI says so. |
-| `submit <letter> <file>` | Submits and waits for the verdict. |
+| `submit <letter> <file> [--no-wait]` | Submits and waits for the verdict. With `--no-wait`, it submits and exits immediately. |
+| `wait [id…]` | Waits for the verdict of the pending submissions. Without an id, it waits for all of them. |
 | `subs` | Lists your submissions and verdicts. |
 | `clar ls` · `clar ask <letter\|geral> <text>` | Lists and asks questions to the judges. |
 | `time` · `doctor` · `update` | Compares the clock · diagnoses · updates. |
 | `outbox` · `sync` · `monitor` | Shows the offline queue · resends now · watches the network outage. |
 
+**Wait for the verdict.** `submit` waits until the verdict comes out, with no time limit. In a terminal, a line
+shows the waiting time. After 60 s, the CLI tells you that it is slow. To stop waiting, press Ctrl-C. The
+submission stays in the judge queue. To wait again, run `moj-comp wait`. To see the list, run `moj-comp subs`.
+
 **Offline mode.** When `submit` cannot reach the server, the CLI packs the submission. The package is
 encrypted with the public key of the contest, received at login. The package carries the current UTC
 time, corrected by the measured clock offset. `moj-comp monitor` watches the network. When the
-network returns, it resends by itself. The submission counts at the stamped time. The route is
+network returns, it resends by itself and shows the verdicts in the next rounds. The submission counts at the stamped time. The route is
 `/contest/offline-submit`. A signed beacon from the server and the arrival time bound the stamp. See
 `cdmoj/docs/FLOW.md`, section 7½. The competitor guide is at `/contest/cli.html` on the server.
 Requirements: `bash`, `curl`, `jq` and `openssl`.
