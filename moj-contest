@@ -45,6 +45,7 @@
 #       penalty_verdicts= (vazio) = nenhum veredicto penaliza.
 #       Pool de juízes: judges=cpu1,cpu2. judges= (vazio) = qualquer juiz.
 #       Correção manual: manual_verdict=true review_judges=2 (1 a 5 juízes validam).
+#       Prioridade no julgamento: priority=lista-publica|lista-privada|prova (Super: veja `priority`).
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]   Prorroga o fim.
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
@@ -113,6 +114,9 @@
 #       ls e get funcionam com qualquer conta do contest e mostram só o publicado.
 #       gen, publish e cover exigem .admin ou .cjudge.
 #   moj-contest remove <cid>             Tira o contest do ar. Exige .admin do treino.
+#   moj-contest priority <cid> <lista-publica|lista-privada|prova|super>   Muda a prioridade no julgamento.
+#       Exige o SUPER-ADMIN do treino (é o único caminho para Super). O admin do contest muda as outras com
+#       `settings set priority=prova`. A mudança fica na auditoria do contest e na do treino.
 # Config: MOJ_URL, MOJ_CONTEST (= -c), MOJ_HOST (header Host em dev). Saída crua: --json.
 # Documentação: README.md (PT) e README.en.md (EN).
 set -euo pipefail
@@ -273,6 +277,10 @@ cmd_remove(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest remove <cid>
   api_t POST "/treino/admin/contest-remove" "$(jq -cn --arg c "$1" '{contest:$c}')" | out '"removido (lixeira): \(.trash // "ok")"'; }
 
 # ---- administração (sessão do contest) ----------------------------------------------------
+# priority <cid> <p> — a prioridade no julgamento pelo Painel do treino (SUPER-ADMIN; a sessão é a do treino)
+cmd_priority(){ need_login_t; [[ $# -eq 2 ]] || die "uso: moj-contest priority <cid> <lista-publica|lista-privada|prova|super>"
+  api_t POST "/treino/admin/contest-priority" "$(jq -cn --arg c "$1" --arg p "$2" '{contest:$c, priority:$p}')" \
+    | out '"\(.contest): prioridade \(.priority)\(if .changed then " (era \(.previous // "não definida"))" else " (já era)" end)"'; }
 cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
   case "$sub" in
     get) api GET "/contest/admin/settings$(qc)" | { [[ "$RAW" == 1 ]] && cat || jq .; };;
@@ -283,7 +291,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
         [[ "$k" != "$kv" ]] || die "esperado k=v: $kv"
         case "$k" in
           languages|judges|score_full_users|penalty_verdicts) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k] = ($v|split(",")|map(select(length>0)))' <<<"$body")";;
-          name|locale|login_ua_substring) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
+          name|locale|login_ua_substring|priority) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
           start|end|login_start|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
           penalty_minutes) [[ "$v" =~ ^[0-9]+$ ]] || die "penalty_minutes espera inteiro (minutos)"; body="$(jq -c --argjson v "$v" '.penalty_minutes=$v' <<<"$body")";;
           review_judges) [[ "$v" =~ ^[1-5]$ ]] || die "review_judges espera 1..5 (nº de juízes que validam cada veredicto; default 2)"; body="$(jq -c --argjson v "$v" '.review_judges=$v' <<<"$body")";;
@@ -1102,7 +1110,7 @@ case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
   create) cmd_create "$@";; list|ls) cmd_list "$@";; show) cmd_show "$@";;
   export) cmd_export "$@";; duplicate|dup) cmd_duplicate "$@";; template|tpl) cmd_template "$@";;
-  remove) cmd_remove "$@";;
+  remove) cmd_remove "$@";; priority|prioridade) cmd_priority "$@";;
   settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
   modules|modulos|mod) cmd_modules "$@";;
   esqueletos|esqueleto|skeletons) cmd_esqueletos "$@";;

@@ -296,8 +296,8 @@ web apply. The server enforces them.
 
 There are two sessions:
 
-1. The commands `create`, `template`, `export`, `duplicate`, `list` and `remove` use the training
-   session. Run `moj login`.
+1. The commands `create`, `template`, `export`, `duplicate`, `list`, `remove` and `priority` use the
+   training session. Run `moj login`.
 2. The admin commands require a session in that contest. Run `moj-contest login <cid>` with a
    `*.admin` account of the contest. The token lives in `~/.config/moj/token-<cid>`. It does not
    replace the training session.
@@ -314,7 +314,7 @@ The target contest comes from `-c <cid>` or from `MOJ_CONTEST`.
 | `template list\|show\|save <name> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | Manages named templates on the server. | `moj-contest template save lab --from-contest lab1` |
 | `modules [list]` · `modules on <ids>` · `modules off <ids>` | Manages the contest modules. `list` shows on or off, and if each module has data. Turning off never deletes data. Ids: `sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos`. The module `virtual` (virtual participation: training accounts redo the ended contest) turns on only when the contest is not secret, is ICPC, and ALL problems are public in training; else the API answers 422 `virtual_not_eligible`. The module `esqueletos` turns on only with the built-in editor; else the API answers 422 `editor_required`. | `moj-contest -c lab1 modules on baloes,documentos` |
 | `esqueletos [ls]` · `esqueletos show <lang>` · `esqueletos set <lang> --from <file\|->` · `esqueletos off <lang>` · `esqueletos reset <lang>` | Manages the code skeleton that the team editor shows (module `esqueletos`). Each language uses the MOJ default, a custom skeleton (`set`) or none (`off`). `reset` goes back to the default. Writing turns the module on. The module needs the built-in editor on. | `moj-contest -c lab1 esqueletos set c --from skeleton.c` |
-| `settings get` · `settings set k=v …` | Reads and writes the settings. ICPC penalty: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce`. Empty value: no verdict penalizes. Judge pool: `judges=cpu1,cpu2`. Empty: any online judge. | `moj-contest -c lab1 settings set manual_verdict=true` |
+| `settings get` · `settings set k=v …` | Reads and writes the settings. ICPC penalty: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce`. Empty value: no verdict penalizes. Judge pool: `judges=cpu1,cpu2`. Empty: any online judge. Judging priority: `priority=lista-publica`, `lista-privada` or `prova`. The change goes to the audit log. | `moj-contest -c lab1 settings set manual_verdict=true` |
 | `extend <+min\|epoch> [--group <regex> [--reason <txt>]]` | Extends the end. With `--group`, only for the matching logins. | `moj-contest -c lab1 extend +30 --group '^sala2'` |
 | `problems ls\|add <id> [--name N] [--letter L]\|rm <letter>\|rename <letter> <name>\|reorder <L1> <L2>…\|langs <letter> <l1,l2\|->\|judges <letter> <h1,h2\|->` | Manages the contest problems. `langs -` and `judges -` inherit from the contest again. | `moj-contest -c lab1 problems add apc#vetor1 --letter A` |
 | `problems search <q> [--collection C]` · `problems draw [--collections "A,B"] [--tags a,b] [--count N] [--difficulty d] [--match any\|all] [--seed s] [--add] [--include-private]` | Searches the public bank. Draws by collection, tag and difficulty. `--add` adds the result. `--include-private` adds the contest owner's private problems (default: public only; private ones are marked 🔒). | `moj-contest -c lab1 problems draw --tags graphs --count 3 --add` |
@@ -340,6 +340,7 @@ The target contest comes from `-c <cid>` or from `MOJ_CONTEST`.
 | `docs set caderno_version=v1.2 [errata=…] [cover_note=…] [samples_table=true\|false]` · `docs text <info\|capa> [--show\|--from file\|--reset]` | Edits document data and texts. `samples_table=true` lays out the problem set samples as a "Sample input N \| Sample output N" table (SBC mold); the default is stacked boxes, like on the site — samples with long lines look better that way. Texts are Markdown with `{{…}}` markers. `text capa --show` prints the MOJ default cover while it has not been edited (the default cover is a text too); `--reset` goes back to the default. | `moj-contest -c lab1 docs set caderno_version=v1.1` |
 | `seed [--teams N] [--subs N] [--seed S]` | Populates a demo contest (`DEMO=1`) with synthetic data. | `moj-contest -c demo seed --teams 20` |
 | `remove <cid>` | Takes the contest off the air. It requires a training `.admin`. | `moj-contest remove lab1` |
+| `priority <cid> <priority>` | Changes the judging priority: `lista-publica`, `lista-privada`, `prova` or `super`. It requires the training super-admin. It is the only path to `super`. The change goes to the audit log of the contest and of the training. | `moj-contest priority maratona super` |
 
 ### The creation spec and the modules
 
