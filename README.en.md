@@ -98,7 +98,9 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 - `8) Conf` has shortcuts for the common options: `calibrafactor`, `ULIMITS`, `CALIBRATIONTL`,
   `ALLOWPARALLELTEST`, `STOPWHEN`, and the **parallel problem** ones: `7) CPUNEEDED` (CPUs per
   test — OpenMP/MPI), `8) SAMENUMA` (same NUMA node) and `9) MAXPARALLELTESTS` (ceiling of tests
-  at once). It also allows raw editing of the file. Guide: `mojtools/docs/problema-paralelo.md`.
+  at once). `10) FUNCTION_LANGS` declares the **function-submission** languages: in these
+  languages the student editor opens empty. It also allows raw editing of the file. Guides:
+  `mojtools/docs/problema-paralelo.md` and `mojtools/docs/submissao-de-funcao.md`.
 - `9) Collections` marks the problem in existing collections. It also creates a new collection.
 
 ## `moj` commands
@@ -118,7 +120,7 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj checker <dir> <checker.cpp> [--force]` | Installs a testlib checker. It requires local mojtools (`MOJTOOLS_DIR`). It refuses to overwrite an existing `scripts/`. `--force` replaces it. | `moj checker ./p chk.cpp` |
 | `moj validator [<dir>] [<validator.cpp>]` | Testlib INPUT validator (`scripts/validator.cpp`): with the file, it installs it; it always compiles it with your `g++` and runs it on `tests/input/*` with the same script the judge uses. Exits 1 if some input is invalid. It requires local mojtools. Guide: `mojtools/docs/validador-testlib.md`. | `moj validator . validator.cpp` |
 | `moj interactive <dir> <referee> [--score]` | Installs the interactive-problem driver and writes `SAMPLE=no` in `conf`. It requires local mojtools. | `moj interactive ./p ref.cpp` |
-| `moj fn <dir> [--langs …] [--force]` | Installs the function-submission drivers in 5 languages, with an anti-IO sentinel. It requires local mojtools. | `moj fn ./p --langs c,py` |
+| `moj fn <dir> [--langs …] [--force]` | Installs the function-submission drivers in 5 languages, with an anti-IO sentinel, and writes `FUNCTION_LANGS` in the `conf`. It requires local mojtools. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renders the statement as HTML and opens it in the browser. `--lang` renders the translation, with the translated title and explanations. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<title>]` | Shows or sets the title. With `--lang`, the title of the translation. It writes to `.moj-id`. It applies on the next `push`. | `moj title . --lang en "Sum"` |
 | `moj download [<id>] [file] [--sha <sha>]` | Downloads the whole package. `--sha` downloads the version of that commit. | `moj download apc#vetor1` |
@@ -301,7 +303,8 @@ The target contest comes from `-c <cid>` or from `MOJ_CONTEST`.
 | `export <cid> [file] [--full]` | Writes the contest spec to a file. Without credentials. It carries the `modules{}` section with the data of each enabled module. Without secrets. | `moj-contest export lab1` |
 | `duplicate <cid> [--id --name --start --end]` | Copies a contest. Without users. The round plan follows the new dates. | `moj-contest duplicate lab1 --id lab2` |
 | `template list\|show\|save <name> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | Manages named templates on the server. | `moj-contest template save lab --from-contest lab1` |
-| `modules [list]` · `modules on <ids>` · `modules off <ids>` | Manages the contest modules. `list` shows on or off, and if each module has data. Turning off never deletes data. Ids: `sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao`. | `moj-contest -c lab1 modules on baloes,documentos` |
+| `modules [list]` · `modules on <ids>` · `modules off <ids>` | Manages the contest modules. `list` shows on or off, and if each module has data. Turning off never deletes data. Ids: `sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos`. The module `virtual` (virtual participation: training accounts redo the ended contest) turns on only when the contest is not secret, is ICPC, and ALL problems are public in training; else the API answers 422 `virtual_not_eligible`. The module `esqueletos` turns on only with the built-in editor; else the API answers 422 `editor_required`. | `moj-contest -c lab1 modules on baloes,documentos` |
+| `esqueletos [ls]` · `esqueletos show <lang>` · `esqueletos set <lang> --from <file\|->` · `esqueletos off <lang>` · `esqueletos reset <lang>` | Manages the code skeleton that the team editor shows (module `esqueletos`). Each language uses the MOJ default, a custom skeleton (`set`) or none (`off`). `reset` goes back to the default. Writing turns the module on. The module needs the built-in editor on. | `moj-contest -c lab1 esqueletos set c --from skeleton.c` |
 | `settings get` · `settings set k=v …` | Reads and writes the settings. ICPC penalty: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce`. Empty value: no verdict penalizes. Judge pool: `judges=cpu1,cpu2`. Empty: any online judge. | `moj-contest -c lab1 settings set manual_verdict=true` |
 | `extend <+min\|epoch> [--group <regex> [--reason <txt>]]` | Extends the end. With `--group`, only for the matching logins. | `moj-contest -c lab1 extend +30 --group '^sala2'` |
 | `problems ls\|add <id> [--name N] [--letter L]\|rm <letter>\|rename <letter> <name>\|reorder <L1> <L2>…\|langs <letter> <l1,l2\|->\|judges <letter> <h1,h2\|->` | Manages the contest problems. `langs -` and `judges -` inherit from the contest again. | `moj-contest -c lab1 problems add apc#vetor1 --letter A` |
@@ -358,7 +361,7 @@ or an object with the module data. A present object turns the module on, except 
 Sections: `sedes{regions, teams_meta, time_overrides}`, `baloes{colors, during_freeze}`,
 `coortes{cohorts}`, `maquinas{ua_gate, site_lock, nutella_url}`, `rodadas{active, rounds}`,
 `documentos{config}`, `inscricoes{enabled, window}`, `telao{views}`, `classificacao{algorithm,
-config}`. `export` returns the same section. It does not return secrets. `create` generates new
+config}`, `esqueletos{langs}`. `export` returns the same section. It does not return secrets. `create` generates new
 webcast keys from `views`. A section with the wrong type answers 422 `modules_spec_invalid`.
 
 ## Who can create

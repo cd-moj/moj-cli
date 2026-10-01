@@ -48,6 +48,7 @@
 #                                         testlib sobre tests/input/*. Sai 1 se há entrada inválida.
 #   moj interactive <dir> <arbitro> [--score]   Instala o driver de problema interativo.
 #   moj fn <dir> [--langs c,cpp,py,java,rs]     Instala os drivers de submissão de função.
+#       Também grava FUNCTION_LANGS no conf: nessas linguagens o editor do aluno abre vazio.
 # Histórico
 #   moj log [<id>] [-n N] | moj log [<id>] <sha>  Mostra o histórico git. Com <sha>, mostra o diff.
 #   moj restore [<id>] <sha>              Restaura a versão como um commit novo.
@@ -854,6 +855,23 @@ gate(){ local d="$1" ok=1
   find "$d/sols/good" -maxdepth 1 -type f 2>/dev/null | grep -q . || { echo "  ⚠ sem solução em sols/good/" >&2; ok=0; }
   if [[ -f "$d/tests/score" ]]; then score_gate "$d" || ok=0; fi
   parallel_conf_gate "$d" || ok=0
+  function_conf_gate "$d" || ok=0
+  [[ $ok -eq 1 ]]; }
+# function_conf_gate <dir> — FUNCTION_LANGS (submissão de função, cdmoj/docs/PACOTE.md): cada linguagem
+# listada precisa do driver scripts/<lang>/compile.sh (é ele que traz o main). A MESMA regra do
+# validate-problem.sh (conf_function_sane) — melhor saber antes de subir. Ids canônicos: py3 → py.
+fn_lang_canon(){ case "$1" in py2|py3) printf py;; cc|cxx|c++) printf cpp;; *) printf '%s' "$1";; esac; }
+function_conf_gate(){ local d="$1" ok=1 v l c dirs=" " f
+  v="$(conf_get "$d" FUNCTION_LANGS | tr 'A-Z' 'a-z')"; v="${v%%#*}"
+  [[ -n "${v//[[:space:],]/}" ]] || return 0
+  for f in "$d"/scripts/*/compile.sh; do [[ -f "$f" ]] && dirs+="$(fn_lang_canon "$(basename "$(dirname "$f")")") "; done
+  local -a ls_; IFS=', ' read -ra ls_ <<<"$v"
+  for l in "${ls_[@]}"; do
+    [[ -n "$l" ]] || continue
+    c="$(fn_lang_canon "$l")"
+    [[ "$c" =~ ^[a-z0-9]{1,16}$ ]] || { echo "  ⚠ FUNCTION_LANGS: '$l' não é id de linguagem" >&2; ok=0; continue; }
+    [[ "$dirs" == *" $c "* ]] || { echo "  ⚠ FUNCTION_LANGS lista $c, mas falta scripts/$c/compile.sh (o driver com o main)" >&2; ok=0; }
+  done
   [[ $ok -eq 1 ]]; }
 # parallel_conf_gate <dir> — as chaves de paralelismo do conf (CPUNEEDED 1..64, SAMENUMA y/n,
 # MAXPARALLELTESTS inteiro ≥ 1, ALLOWPARALLELTEST y/n): valor inválido reprova no servidor
@@ -1665,6 +1683,8 @@ edit_conf(){ local d="$1"
     # problema PARALELO (OpenMP/MPI): CPUs por teste + nó NUMA; e o teto de testes ao mesmo tempo
     printf '  7) CPUNEEDED (CPUs por teste): %s   8) SAMENUMA: %s   9) MAXPARALLELTESTS: %s\n' \
       "$(conf_get "$d" CPUNEEDED)" "$(conf_get "$d" SAMENUMA)" "$(conf_get "$d" MAXPARALLELTESTS)"
+    # submissão de FUNÇÃO: as linguagens em que o editor do aluno abre vazio (o driver traz o main)
+    printf '  10) linguagens de submissão de função (FUNCTION_LANGS): %s\n' "$(conf_get "$d" FUNCTION_LANGS)"
     case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
       1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
       2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
@@ -1685,6 +1705,13 @@ edit_conf(){ local d="$1"
          if [[ -z "$m" ]]; then conf_set "$d" MAXPARALLELTESTS ""
          elif [[ "$m" =~ ^[0-9]+$ && "$m" -ge 1 ]]; then conf_set "$d" MAXPARALLELTESTS "$m"
          else echo "  valor inválido (inteiro ≥ 1)"; fi;;
+      10) local fl; fl="$(ask '  FUNCTION_LANGS — linguagens em que o aluno envia SÓ a função, separadas por vírgula (ex.: c,py; vazio = nenhuma): ' "$(conf_get "$d" FUNCTION_LANGS)")"
+         fl="$(printf '%s' "$fl" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+         if [[ -z "$fl" ]]; then conf_set "$d" FUNCTION_LANGS ""; echo "  FUNCTION_LANGS removido: o editor do aluno mostra o esqueleto com main"
+         elif [[ "$fl" =~ ^[a-z0-9+]+(,[a-z0-9+]+)*$ ]]; then conf_set "$d" FUNCTION_LANGS "$fl"
+           echo "  FUNCTION_LANGS=$fl: nessas linguagens o editor do aluno abre vazio (não pede recalibração)."
+           function_conf_gate "$d" || true
+         else echo "  valor inválido (ids separados por vírgula, ex.: c,cpp,py)"; fi;;
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }

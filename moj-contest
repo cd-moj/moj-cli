@@ -28,10 +28,17 @@
 #   moj-contest -c <cid> modules [list] | on <id[,id…]> | off <id[,id…]>
 #       Gerencia os módulos: sedes, maquinas, rodadas, documentos, baloes, coortes, inscricoes,
 #       telao, classificacao, virtual (participação virtual: só liga com TODOS os problemas públicos
-#       no treino e contest não-secreto — senão 422 virtual_not_eligible). list mostra ligado/desligado e se há dados. Desligar não apaga dado.
-#       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos.
+#       no treino e contest não-secreto — senão 422 virtual_not_eligible), esqueletos (esqueleto de
+#       código no editor do time: só liga com o editor embutido — senão 422 editor_required).
+#       list mostra ligado/desligado e se há dados. Desligar não apaga dado.
+#       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos, menos
+#       virtual e esqueletos.
 #       Gravar o dado de um módulo (rounds add, cohorts add, ua-gate set, docs gen…) liga o
 #       módulo sozinho. Só desligar é manual.
+#   moj-contest -c <cid> esqueletos [ls] | show <lang> | set <lang> --from <arq|-> | off <lang> | reset <lang>
+#       O esqueleto de código que o editor do time mostra (módulo esqueletos). Cada linguagem usa o
+#       padrão do MOJ, um esqueleto personalizado (set) ou nenhum (off). reset volta ao padrão.
+#       Gravar liga o módulo. O módulo precisa do editor embutido ligado.
 #   moj-contest -c <cid> settings [get]  Mostra as configurações.
 #   moj-contest -c <cid> settings set k=v [k=v…]   Grava configurações.
 #       Penalidade ICPC: penalty_minutes=10 penalty_verdicts=wa,tle,mle,rte,ce.
@@ -293,11 +300,43 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
 cmd_modules(){ need_contest; need_login; local sub="${1:-list}"; shift || true
   case "$sub" in
     list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
-    on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual)"
+    on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos)"
       local ids="$1"; [[ "$ids" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "ids separados por vírgula, sem espaço"
       api POST "/contest/admin/modules$(qc)" "$(jq -cn --arg k "$sub" --arg v "$ids" '{($k): ($v|split(","))}')" \
         | out '"módulos ligados: \(if (.enabled|length) > 0 then (.enabled|join(", ")) else "nenhum" end)"';;
     *) die "modules: use 'list', 'on <ids>' ou 'off <ids>'";;
+  esac; }
+# esqueletos (módulo `esqueletos`): o esqueleto de código por linguagem do editor do time. O padrão mora só
+# no servidor web (shared/languages.js); a API guarda o que o contest trocou. O código anda por ARQUIVO
+# (--rawfile), nunca por argv do jq (ARG_MAX — test/argmax.sh).
+cmd_esqueletos(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
+  local P="/contest/admin/esqueletos$(qc)"
+  case "$sub" in
+    ls|list)
+      api GET "$P" | out '"módulo: \(if .module_on then "ligado" else "desligado" end) · editor embutido: \(if .editor_on then "ligado" else "DESLIGADO (o time não vê esqueleto)" end)",
+        (if (.langs | length) == 0 then "todas as linguagens: padrão do MOJ"
+         else (.langs | to_entries[] | "\(.key)\t\(if .value.mode == "off" then "sem esqueleto (abre vazio)" else "personalizado (\(.value.code | utf8bytelength) bytes)" end)"),
+              "as demais: padrão do MOJ" end)' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    show)
+      [[ $# -ge 1 ]] || die "uso: esqueletos show <lang>"
+      api GET "$P" | jq -r --arg l "$1" '(.langs[$l] // null) as $e
+        | if $e == null then "(\($l): padrão do MOJ)" elif $e.mode == "off" then "(\($l): sem esqueleto — abre vazio)" else $e.code end';;
+    set)
+      [[ $# -ge 1 ]] || die "uso: esqueletos set <lang> --from <arquivo|->"
+      local lang="$1" from=""; shift
+      while [[ $# -gt 0 ]]; do case "$1" in --from) from="${2:-}"; shift 2;; *) die "opção: $1";; esac; done
+      [[ -n "$from" ]] || die "uso: esqueletos set <lang> --from <arquivo|->"
+      local cf bf; cf="$(mktemp)"; bf="$(mktemp)"
+      if [[ "$from" == - ]]; then cat > "$cf"; else [[ -f "$from" ]] || { rm -f "$cf" "$bf"; die "arquivo inexistente: $from"; }; cat "$from" > "$cf"; fi
+      jq -cn --arg l "$lang" --rawfile c "$cf" '{action:"set", lang:$l, code:$c}' > "$bf"
+      local r; r="$(api_post_file "$P" "$bf")" || { rm -f "$cf" "$bf"; exit 1; }
+      rm -f "$cf" "$bf"
+      jq -r --arg l "$lang" '"\($l): \(if .langs[$l].mode == "off" then "sem esqueleto (o código estava vazio)" else "personalizado gravado" end) · módulo \(if .module_on then "ligado" else "desligado" end)"' <<<"$r";;
+    off|reset)
+      [[ $# -ge 1 ]] || die "uso: esqueletos $sub <lang>"
+      api POST "$P" "$(jq -cn --arg a "$sub" --arg l "$1" '{action:$a, lang:$l}')" \
+        | jq -r --arg l "$1" --arg a "$sub" '"\($l): \(if $a == "off" then "sem esqueleto (abre vazio)" else "padrão do MOJ" end)"';;
+    *) die "esqueletos: use ls, show <lang>, set <lang> --from <arq|->, off <lang> ou reset <lang>";;
   esac; }
 cmd_extend(){ need_contest; need_login
   # extend <+min|epoch> [--group <regex> [--reason <txt>]]
@@ -1066,6 +1105,7 @@ case "$cmd" in
   remove) cmd_remove "$@";;
   settings|config) cmd_settings "$@";; extend) cmd_extend "$@";;
   modules|modulos|mod) cmd_modules "$@";;
+  esqueletos|esqueleto|skeletons) cmd_esqueletos "$@";;
   problems|prob) cmd_problems "$@";; users|user) cmd_users "$@";; regions|sedes) cmd_regions "$@";;
   sessions) cmd_sessions "$@";; dashboard|dash) cmd_dashboard "$@";; score) cmd_score "$@";;
   report) cmd_report "$@";;

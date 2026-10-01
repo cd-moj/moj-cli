@@ -99,7 +99,9 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 - `8) Conf` tem atalhos para as opções comuns: `calibrafactor`, `ULIMITS`, `CALIBRATIONTL`,
   `ALLOWPARALLELTEST`, `STOPWHEN`, e os do **problema paralelo**: `7) CPUNEEDED` (CPUs por
   teste — OpenMP/MPI), `8) SAMENUMA` (mesmo nó NUMA) e `9) MAXPARALLELTESTS` (teto de testes ao
-  mesmo tempo). Também permite a edição bruta do arquivo. Guia: `mojtools/docs/problema-paralelo.md`.
+  mesmo tempo). `10) FUNCTION_LANGS` declara as linguagens de **submissão de função**: nelas o
+  editor do aluno abre vazio. Também permite a edição bruta do arquivo. Guias:
+  `mojtools/docs/problema-paralelo.md` e `mojtools/docs/submissao-de-funcao.md`.
 - `9) Coleções` marca o problema em coleções existentes. Também cria uma coleção nova.
 
 ## Comandos do `moj`
@@ -119,7 +121,7 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj checker <dir> <checker.cpp> [--force]` | Instala um checker testlib. Exige o mojtools local (`MOJTOOLS_DIR`). Recusa sobrescrever um `scripts/` existente. `--force` substitui. | `moj checker ./p chk.cpp` |
 | `moj validator [<dir>] [<validator.cpp>]` | Validador de ENTRADA testlib (`scripts/validator.cpp`): com o arquivo, instala; sempre compila com o seu `g++` e roda sobre `tests/input/*` pelo mesmo script do juiz. Sai 1 se alguma entrada é inválida. Exige o mojtools local. Guia: `mojtools/docs/validador-testlib.md`. | `moj validator . validator.cpp` |
 | `moj interactive <dir> <arbitro> [--score]` | Instala o driver de problema interativo e grava `SAMPLE=no` no `conf`. Exige o mojtools local. | `moj interactive ./p arb.cpp` |
-| `moj fn <dir> [--langs …] [--force]` | Instala os drivers de submissão de função em 5 linguagens, com sentinela anti-IO. Exige o mojtools local. | `moj fn ./p --langs c,py` |
+| `moj fn <dir> [--langs …] [--force]` | Instala os drivers de submissão de função em 5 linguagens, com sentinela anti-IO, e grava `FUNCTION_LANGS` no `conf`. Exige o mojtools local. | `moj fn ./p --langs c,py` |
 | `moj preview [dir] [--lang en\|es]` | Renderiza o enunciado em HTML e abre no navegador. `--lang` renderiza a tradução, com o título e as explicações traduzidas. | `moj preview --lang en` |
 | `moj title [dir] [--lang en\|es] [<título>]` | Mostra ou define o título. Com `--lang`, o título da tradução. Grava no `.moj-id`. Aplica no próximo `push`. | `moj title . --lang en "Sum"` |
 | `moj download [<id>] [arq] [--sha <sha>]` | Baixa o pacote inteiro. `--sha` baixa a versão daquele commit. | `moj download apc#vetor1` |
@@ -300,7 +302,8 @@ O contest alvo vem de `-c <cid>` ou de `MOJ_CONTEST`.
 | `export <cid> [arq] [--full]` | Grava o spec do contest em um arquivo. Sem credenciais. Traz a seção `modules{}` com os dados de cada módulo ligado. Sem segredos. | `moj-contest export lab1` |
 | `duplicate <cid> [--id --name --start --end]` | Copia um contest. Sem usuários. O plano de rodadas acompanha as datas novas. | `moj-contest duplicate lab1 --id lab2` |
 | `template list\|show\|save <nome> (--from-contest <cid> [--with-problems] \| --from-file f)\|rm\|rename` | Gerencia templates nomeados no servidor. | `moj-contest template save lab --from-contest lab1` |
-| `modules [list]` · `modules on <ids>` · `modules off <ids>` | Gerencia os módulos do contest. `list` mostra ligado ou desligado, e se há dados de cada módulo. Desligar nunca apaga dado. Ids: `sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual`. O módulo `virtual` (participação virtual: contas do treino refazem a prova encerrada) só liga quando o contest não é secreto, é ICPC e TODOS os problemas são públicos no treino; senão a API responde 422 `virtual_not_eligible`. | `moj-contest -c lab1 modules on baloes,documentos` |
+| `modules [list]` · `modules on <ids>` · `modules off <ids>` | Gerencia os módulos do contest. `list` mostra ligado ou desligado, e se há dados de cada módulo. Desligar nunca apaga dado. Ids: `sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos`. O módulo `virtual` (participação virtual: contas do treino refazem a prova encerrada) só liga quando o contest não é secreto, é ICPC e TODOS os problemas são públicos no treino; senão a API responde 422 `virtual_not_eligible`. O módulo `esqueletos` só liga com o editor embutido; senão a API responde 422 `editor_required`. | `moj-contest -c lab1 modules on baloes,documentos` |
+| `esqueletos [ls]` · `esqueletos show <lang>` · `esqueletos set <lang> --from <arq\|->` · `esqueletos off <lang>` · `esqueletos reset <lang>` | Gerencia o esqueleto de código que o editor do time mostra (módulo `esqueletos`). Cada linguagem usa o padrão do MOJ, um esqueleto personalizado (`set`) ou nenhum (`off`). `reset` volta ao padrão. Gravar liga o módulo. O módulo precisa do editor embutido ligado. | `moj-contest -c lab1 esqueletos set c --from esqueleto.c` |
 | `settings get` · `settings set k=v …` | Lê e grava as configurações. Penalidade ICPC: `penalty_minutes=10`, `penalty_verdicts=wa,tle,mle,rte,ce`. Valor vazio: nenhum veredicto penaliza. Pool de juízes: `judges=cpu1,cpu2`. Vazio: qualquer juiz online. | `moj-contest -c lab1 settings set manual_verdict=true` |
 | `extend <+min\|epoch> [--group <regex> [--reason <txt>]]` | Prorroga o fim. Com `--group`, só para os logins que casam. | `moj-contest -c lab1 extend +30 --group '^sala2'` |
 | `problems ls\|add <id> [--name N] [--letter L]\|rm <letra>\|rename <letra> <nome>\|reorder <L1> <L2>…\|langs <letra> <l1,l2\|->\|judges <letra> <h1,h2\|->` | Gerencia os problemas do contest. `langs -` e `judges -` voltam a herdar do contest. | `moj-contest -c lab1 problems add apc#vetor1 --letter A` |
@@ -358,7 +361,7 @@ objeto com os dados do módulo. Um objeto presente liga o módulo, exceto com `o
 Seções: `sedes{regions, teams_meta, time_overrides}`, `baloes{colors, during_freeze}`,
 `coortes{cohorts}`, `maquinas{ua_gate, site_lock, nutella_url}`, `rodadas{active, rounds}`,
 `documentos{config}`, `inscricoes{enabled, window}`, `telao{views}`, `classificacao{algorithm,
-config}`. O `export` devolve a mesma seção. Ele não devolve segredos. O `create` gera chaves novas
+config}`, `esqueletos{langs}`. O `export` devolve a mesma seção. Ele não devolve segredos. O `create` gera chaves novas
 de webcast a partir de `views`. Uma seção com tipo errado responde 422 `modules_spec_invalid`.
 
 ## Quem pode criar
