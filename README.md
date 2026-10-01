@@ -279,6 +279,10 @@ site. Depois use `problems <busca>`, `statement <org#slug> [--lang en]` (grava `
 `submit <org#slug> <arquivo>` e `subs`. O guia do treino está em
 `/treino/cli.html`.
 
+**Limite de envios na fila.** No treino e nos contests de lista, a conta tem no máximo 3 envios esperando
+veredicto. O 4º recebe `HTTP 429` com a mensagem do servidor. Espere sair um resultado e envie de novo. Uma
+resposta de erro do servidor nunca vira pacote offline.
+
 ## Gestão de contest (`moj-contest` / `moj contest …`)
 
 `moj-contest` cria, reaproveita e administra contests pela API. Os mesmos bloqueios da web valem.

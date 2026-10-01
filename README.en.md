@@ -280,6 +280,10 @@ site account. Then use `problems <search>`, `statement <org#slug> [--lang en]` (
 and one `slug.<lang>.html` per translation), `submit <org#slug> <file>` and `subs`. The training
 guide is at `/treino/cli.html`.
 
+**Queue limit.** In open training and in list contests, an account has at most 3 submissions waiting for a
+verdict. The 4th one gets `HTTP 429` with the server message. Wait for a result and submit again. An error
+response from the server never becomes an offline package.
+
 ## Contest management (`moj-contest` / `moj contest …`)
 
 `moj-contest` creates, reuses and administers contests through the API. The same restrictions as the
