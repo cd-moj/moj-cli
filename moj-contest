@@ -293,7 +293,9 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
         case "$k" in
           languages|judges|score_full_users|penalty_verdicts) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k] = ($v|split(",")|map(select(length>0)))' <<<"$body")";;
           name|locale|login_ua_substring|priority|tz) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
-          start|end|login_start|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
+          # login_start= (vazio) ou 0 APAGA a abertura própria: o login volta a abrir no início da rodada
+          login_start) [[ -z "$v" ]] && v=0; [[ "$v" =~ ^[0-9]+$ ]] || die "login_start espera epoch (vazio ou 0 apaga a abertura)"; body="$(jq -c --argjson v "$v" '.login_start=$v' <<<"$body")";;
+          start|end|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
           penalty_minutes) [[ "$v" =~ ^[0-9]+$ ]] || die "penalty_minutes espera inteiro (minutos)"; body="$(jq -c --argjson v "$v" '.penalty_minutes=$v' <<<"$body")";;
           review_judges) [[ "$v" =~ ^[1-5]$ ]] || die "review_judges espera 1..5 (nº de juízes que validam cada veredicto; default 2)"; body="$(jq -c --argjson v "$v" '.review_judges=$v' <<<"$body")";;
           *) case "$v" in

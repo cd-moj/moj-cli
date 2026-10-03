@@ -2,6 +2,7 @@
 # contest-priority.sh — a PRIORIDADE no julgamento e o FUSO da prova pela CLI (01–03/10/2026):
 #   • `moj-contest -c <cid> settings set priority=prova` manda {"priority":"prova"} (texto) ao /contest/admin/settings;
 #   • `settings set tz=America/Santiago` manda o fuso (texto); `tz=` vazio manda "" (volta ao padrão);
+#   • `settings set login_start=` (vazio) manda 0 = apaga a abertura própria do login;
 #   • `moj-contest priority <cid> <p>` (super-admin do treino) manda {contest, priority} ao
 #     /treino/admin/contest-priority com o token do TREINO e diz a anterior; uso errado morre antes da rede.
 #   • `moj-contest rounds undo` (03/10/2026, TCP 2026): confere o id do contest e manda {action:"undo", confirm}; com
@@ -50,6 +51,14 @@ run -c cp settings set tz=America/Santiago
 chk "rc 0, corpo {tz:\"America/Santiago\"}"           '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"tz\":\"America/Santiago\"}" ]]'
 run -c cp settings set tz=
 chk "tz= vazio manda \"\" (volta ao padrão)"          '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"tz\":\"\"}" ]]'
+
+echo "== settings set login_start= (vazio ou 0 APAGA a abertura própria; TCP 2026) =="
+run -c cp settings set login_start=
+chk "login_start= vazio manda 0"                     '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"login_start\":0}" ]]'
+run -c cp settings set login_start=1791000000
+chk "login_start=<epoch> manda o epoch"              '[[ "$(jq -c . "$T/body.json")" == "{\"login_start\":1791000000}" ]]'
+run -c cp settings set login_start=amanha
+chk "login_start inválido morre antes da rede"       '[[ "$(cat "$T/rc")" != 0 && ! -s "$T/urls" ]]'
 
 echo "== priority <cid> <p> (super-admin, token do treino) =="
 run priority cp super
