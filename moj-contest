@@ -78,7 +78,7 @@
 #                       | set <slug> [--slug <novo>] [--name N] [--start …] [--end …] [--freeze …] [--kind …]
 #                       | problems <slug> [ls|set <id,id…>|add <id>|rm <letra>]
 #                       | colors <slug> [ls|set <json>|set A=RRGGBB,B=RRGGBB[,sonic]|clear]
-#                       | promote [--force] | publish <slug> | unpublish <slug> | rm <slug>
+#                       | promote [--force] | undo | publish <slug> | unpublish <slug> | rm <slug>
 #                       | archive <slug> [arq.tar.gz]
 #       Aquecimento e prova oficial no mesmo contest: mesma URL, mesmo login, config intacta.
 #       Promover arquiva a rodada no ar (submissões, veredictos, placar e logs ficam guardados) e
@@ -906,6 +906,21 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       [[ "$c" == "$CONTEST" ]] || die "não confere — nada foi alterado."
       api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg t "$to" --argjson f "$force" '{action:"promote",to:$t,force:$f}')" \
         | out '"promovida: \(.from) -> \(.to)  (arquivadas \(.archived.submissions) submissões de \(.archived.users) contas)"';;
+    undo)
+      # desfaz a ÚLTIMA promoção: a rodada arquivada volta ao ar com tudo, a que entrou volta a planejada.
+      # Só enquanto a rodada no ar não teve atividade nenhuma (o servidor confere e diz por quê).
+      local st; st="$(api GET "/contest/admin/rounds$(qc)")"
+      local fr to; fr="$(jq -r '.undo.from // ""' <<<"$st")"; to="$(jq -r '.undo.to // ""' <<<"$st")"
+      if [[ "$(jq -r '.undo.possible // false' <<<"$st")" != true ]]; then
+        echo "não dá para desfazer a última promoção:" >&2
+        jq -r '.undo.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$st" >&2
+        die "nada foi alterado."
+      fi
+      echo "isto DESFAZ a promoção: '$fr' volta ao ar com tudo o que tinha e '$to' volta a planejada." >&2
+      local c; read -rp "confirme digitando o id do contest ($CONTEST): " c || true
+      [[ "$c" == "$CONTEST" ]] || die "não confere — nada foi alterado."
+      api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg c "$CONTEST" '{action:"undo",confirm:$c}')" \
+        | out '"desfeita: \(.restored) de volta ao ar (\(.submissions) submissões); \(.pending) voltou a planejada"';;
     publish|unpublish)
       [[ $# -ge 1 ]] || die "uso: rounds $sub <slug>"
       local on=true; [[ "$sub" == unpublish ]] && on=false
@@ -919,7 +934,7 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       local slug="$1" outf="${2:-}"; [[ -n "$outf" ]] || outf="$CONTEST-$slug.tar.gz"
       api_get_to_file "/contest/admin/round-archive$(qc)&round=$(enc "$slug")" "$outf"
       echo "$outf ($(wc -c <"$outf" | tr -d '[:space:]') bytes) — inclui código-fonte e logs da rodada";;
-    *) die "rounds: sub desconhecido '$sub' (ls|add|set|problems|promote|publish|unpublish|rm|archive)";;
+    *) die "rounds: sub desconhecido '$sub' (ls|add|set|problems|promote|undo|publish|unpublish|rm|archive)";;
   esac; }
 
 # ---- máquinas (time x IP x User-Agent da rodada) --------------------------------------------
