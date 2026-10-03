@@ -46,6 +46,7 @@
 #       Pool de juízes: judges=cpu1,cpu2. judges= (vazio) = qualquer juiz.
 #       Correção manual: manual_verdict=true review_judges=2 (1 a 5 juízes validam).
 #       Prioridade no julgamento: priority=lista-publica|lista-privada|prova (Super: veja `priority`).
+#       Fuso da prova (horas que o servidor escreve): tz=America/Santiago. tz= (vazio) = padrão.
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]   Prorroga o fim.
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
@@ -291,7 +292,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
         [[ "$k" != "$kv" ]] || die "esperado k=v: $kv"
         case "$k" in
           languages|judges|score_full_users|penalty_verdicts) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k] = ($v|split(",")|map(select(length>0)))' <<<"$body")";;
-          name|locale|login_ua_substring|priority) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
+          name|locale|login_ua_substring|priority|tz) body="$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$body")";;
           start|end|login_start|freeze) [[ "$v" =~ ^[0-9]+$ ]] || die "$k espera epoch"; body="$(jq -c --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$body")";;
           penalty_minutes) [[ "$v" =~ ^[0-9]+$ ]] || die "penalty_minutes espera inteiro (minutos)"; body="$(jq -c --argjson v "$v" '.penalty_minutes=$v' <<<"$body")";;
           review_judges) [[ "$v" =~ ^[1-5]$ ]] || die "review_judges espera 1..5 (nº de juízes que validam cada veredicto; default 2)"; body="$(jq -c --argjson v "$v" '.review_judges=$v' <<<"$body")";;

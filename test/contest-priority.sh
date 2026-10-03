@@ -1,6 +1,7 @@
 #!/bin/bash
-# contest-priority.sh — a PRIORIDADE no julgamento pela CLI (01/10/2026):
+# contest-priority.sh — a PRIORIDADE no julgamento e o FUSO da prova pela CLI (01–03/10/2026):
 #   • `moj-contest -c <cid> settings set priority=prova` manda {"priority":"prova"} (texto) ao /contest/admin/settings;
+#   • `settings set tz=America/Santiago` manda o fuso (texto); `tz=` vazio manda "" (volta ao padrão);
 #   • `moj-contest priority <cid> <p>` (super-admin do treino) manda {contest, priority} ao
 #     /treino/admin/contest-priority com o token do TREINO e diz a anterior; uso errado morre antes da rede.
 # curl FALSO no PATH (molde de test/contest-create.sh): guarda URL, Authorization e corpo; resposta por rota.
@@ -37,6 +38,12 @@ echo "== settings set priority=prova =="
 run -c cp settings set priority=prova
 chk "rc 0, corpo {priority:\"prova\"} em texto"       '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"priority\":\"prova\"}" ]]'
 chk "rota de Regras do contest"                       'grep -q "/contest/admin/settings?contest=cp" "$T/urls"'
+
+echo "== settings set tz=… (fuso da prova, texto; vazio = padrão) =="
+run -c cp settings set tz=America/Santiago
+chk "rc 0, corpo {tz:\"America/Santiago\"}"           '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"tz\":\"America/Santiago\"}" ]]'
+run -c cp settings set tz=
+chk "tz= vazio manda \"\" (volta ao padrão)"          '[[ "$(cat "$T/rc")" == 0 && "$(jq -c . "$T/body.json")" == "{\"tz\":\"\"}" ]]'
 
 echo "== priority <cid> <p> (super-admin, token do treino) =="
 run priority cp super
