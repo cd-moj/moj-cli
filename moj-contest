@@ -92,7 +92,7 @@
 #       Coortes de placar: times oficiais e convidados. Uma coorte privada não aparece no placar
 #       público. --unranked entra intercalado sem consumir posição. release libera os resultados.
 #   moj-contest -c <cid> ua-gate show | check <login>
-#                       | set [--mode enforce|off] [--from-login REGEX --expect '\1']
+#                       | set [--mode enforce|observe|off] [--from-login REGEX --expect '\1']
 #                         [--region 'Sede=substring']… [--regex 'REGEX=substring']…
 #                         [--exempt REGEX]… [--fallback S]
 #       Gate de navegador por sede. A imagem de cada sede manda um User-Agent com um trecho do login
