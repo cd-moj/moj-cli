@@ -47,6 +47,7 @@
 #       Correção manual: manual_verdict=true review_judges=2 (1 a 5 juízes validam).
 #       Prioridade no julgamento: priority=lista-publica|lista-privada|prova (Super: veja `priority`).
 #       Fuso da prova (horas que o servidor escreve): tz=America/Santiago. tz= (vazio) = padrão.
+#       Idioma das telas: locale=pt|en|es. locale= (vazio) = automático (cada um no idioma do navegador).
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]   Prorroga o fim.
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
 #                       | rename <letra> <nome> | titles [<letra>] | apply-titles [<letra>…]
@@ -308,7 +309,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
              esac;;
         esac
       done
-      api POST "/contest/admin/settings$(qc)" "$body" | out '"salvo: \(.changed|join(", "))"';;
+      api POST "/contest/admin/settings$(qc)" "$body" | out 'if (.changed // []) == [] then "nada mudou" else "salvo: \(.changed|join(", "))" end';;
     *) die "settings: use 'get' ou 'set k=v …'";;
   esac; }
 # ---- módulos do contest (Central › Módulos) --------------------------------------------------
