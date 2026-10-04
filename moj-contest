@@ -68,7 +68,7 @@
 #       compartilhamento: sem --apply mostra a PRÉVIA (nada é gravado); com --apply converte em contas
 #       PRÓPRIAS — senhas NOVAS, histórico e placar ficam, cada time vira UMA conta. Pede "sim" antes da
 #       prova e o id do contest depois do início. Sem volta. --csv grava as credenciais (só você lê).
-#   moj-contest -c <cid> regions show | get [arq] | set <arq.json> [--dry-run] [--mode simple|rules|tree]
+#   moj-contest -c <cid> regions show | get [arq] | set <arq.json> [--dry-run] [--mode simple|rules|tree] [--rename VELHO=NOVO]
 #                       | who <login> | assign <login> <sede> | assign --csv <arq> [--dry-run]
 #                       | unassign <login> | map [--csv]
 #       Sedes pela regra única do servidor. A sede GRAVADA vence; senão a regex mais funda casa o login.
@@ -586,15 +586,21 @@ cmd_regions(){ need_contest; need_login; local sub="${1:-show}"; shift || true
       [[ "$RAW" == 1 ]] && { printf '%s\n' "$r"; return 0; }; _rg_show <<<"$r";;
     get) local r; r="$(api GET "/contest/admin/regions$(qc)")" || exit 1
       if [[ -n "${1:-}" ]]; then jq '.tree' <<<"$r" > "$1" && echo "árvore em $1 (sig $(jq -r .sig <<<"$r"))"; else jq '.tree' <<<"$r"; fi;;
-    set) [[ $# -ge 1 && -f "$1" ]] || die "uso: regions set <arq.json> [--dry-run] [--mode simple|rules|tree]"
-      local f="$1" dry=false mode="" a sig r; shift
-      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --dry-run) dry=true;; --mode) mode="${1:-}"; shift || true;; *) die "opção: $a";; esac; done
+    set) [[ $# -ge 1 && -f "$1" ]] || die "uso: regions set <arq.json> [--dry-run] [--mode simple|rules|tree] [--rename VELHO=NOVO]…"
+      local f="$1" dry=false mode="" a sig r ren='[]'; shift
+      while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --dry-run) dry=true;; --mode) mode="${1:-}"; shift || true;;
+        # sede RENOMEADA: o escopo do staff (region:), o gate da sede e o telão acompanham o nome novo
+        --rename) [[ "${1:-}" == ?*=?* ]] || die "uso: --rename VELHO=NOVO"
+          ren="$(jq -c --arg f "${1%%=*}" --arg t "${1#*=}" '. + [{from:$f, to:$t}]' <<<"$ren")"; shift;;
+        *) die "opção: $a";; esac; done
       jq -e 'type == "array"' "$f" >/dev/null 2>&1 || die "$f não é uma lista JSON de sedes"
       sig="$(api GET "/contest/admin/regions$(qc)" | jq -r .sig)" || exit 1
-      r="$(_rg_post "$(jq -c --argjson d "$dry" --arg s "$sig" --arg m "$mode" '{tree:., dry_run:$d, expect_sig:$s} + (if $m != "" then {mode:$m} else {} end)' "$f")")" || exit 1
+      r="$(_rg_post "$(jq -c --argjson d "$dry" --arg s "$sig" --arg m "$mode" --argjson rn "$ren" '{tree:., dry_run:$d, expect_sig:$s} + (if $m != "" then {mode:$m} else {} end) + (if ($rn | length) > 0 then {renames:$rn} else {} end)' "$f")")" || exit 1
       [[ "$RAW" == 1 ]] && { printf '%s\n' "$r"; return 0; }
       [[ "$dry" == true ]] && echo "(prévia — nada foi gravado)" || echo "gravado (sig $(jq -r .sig <<<"$r"))"
-      _rg_show <<<"$r";;
+      _rg_show <<<"$r"
+      jq -r '(if (.refs_renamed // 0) > 0 then "\(.refs_renamed) configuração(ões) acompanharam o nome novo (staff, gate, telão)" else empty end),
+             ((.orphan_refs // [])[] | "  ⚠ ainda aponta p/ sede que não existe: \({staff:"escopo do staff", ua_gate:"gate de navegador", animeitor:"telão"}[.where] // .where) «\(.name)»\(if .login then " (\(.login))" else "" end) — use --rename VELHO=NOVO")' <<<"$r";;
     who) [[ $# -ge 1 ]] || die "uso: regions who <login>"
       api GET "/contest/admin/regions$(qc)&login=$(enc "$1")" | out '"\(.login): \(if .site then .site.name else "(sem sede)" end)  [\({"x":"gravada","o":"gravada, fora da árvore","r":"regex","p":"regex, parou no pai","-":"—"}[.flag] // .flag)]\n  nós: \([.nodes[] | .name + (if .view then " (recorte)" else "" end)] | join(" · "))"';;
     assign|unassign)
