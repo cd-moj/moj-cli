@@ -475,7 +475,7 @@ cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       while [[ $# -gt 0 ]]; do a="$1"; shift; case "$a" in --pass) pw="$1"; shift;; --name) nm="$1"; shift;; --email) em="$1"; shift;; *) die "opção: $a";; esac; done
       api POST "/contest/admin/user-add$(qc)" "$(jq -cn --arg l "$login" --arg p "$pw" --arg n "$nm" --arg e "$em" \
         '{login:$l} + (if $p != "" then {password:$p} else {} end) + (if $n != "" then {fullname:$n} else {} end) + (if $e != "" then {email:$e} else {} end)')" \
-        | out '"\(.user.login)  senha: \(.user.password)"';;
+        | out '"\(.user.login)  senha: \(.user.password)" + (if ((.adjusted // []) | length) > 0 then "\n  nome gravado: \(.adjusted[0].to)  (o \":\" vira \"∶\", igual na tela: o placar usa \":\" como separador)" else "" end)';;
     rm|remove) [[ $# -ge 1 ]] || die "uso: users rm <login>"
       api POST "/contest/admin/user-remove$(qc)" "$(jq -cn --arg l "$1" '{login:$l}')" | out '"removido: \(.login)"';;
     disable) [[ $# -ge 1 ]] || die "uso: users disable <login> [--undo]"
