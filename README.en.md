@@ -254,7 +254,7 @@ the server. If they are equal, it records the baseline. If they differ, it refus
 |---|---|
 | `login <cid\|url>` | Logs into the contest with the credentials from the organization. |
 | `fetch` | Downloads all statements, in every language the contest offers (`A.html`, `A.en.html`…), and the samples of each problem in `samples/<letter>/`. You work without network. |
-| `problems` · `score` · `news` | Lists problems (with the statement languages of each one) · shows the scoreboard · shows announcements. |
+| `problems` · `score` · `news` | Lists problems (with the statement languages of each one) · shows the scoreboard (anonymous scoreboard: only the summary — how many solved how many, per problem, quartiles) · shows announcements. |
 | `statement <letter> [--lang en\|es]` | Downloads one statement. Without `--lang`, every offered language. With a language the contest does not offer, the CLI refuses and lists the available ones. |
 | `samples <letter> [--dir folder]` | Downloads the statement samples as files: `samples/<letter>/<name>.in` and `.out`. `fetch` already does this for every problem (the kit's `samples/` folder). A statement uploaded ready-made by the organization has no samples as files: the CLI says so. |
 | `submit <letter> <file> [--no-wait]` | Submits and waits for the verdict. With `--no-wait`, it submits and exits immediately. |

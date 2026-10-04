@@ -252,7 +252,7 @@ o servidor. Se forem iguais, ele grava a linha de base. Se forem diferentes, ele
 |---|---|
 | `login <cid\|url>` | Entra no contest com as credenciais da organização. |
 | `fetch` | Baixa todos os enunciados, em todos os idiomas que a prova oferece (`A.html`, `A.en.html`…), e os exemplos de cada problema em `samples/<letra>/`. Você trabalha sem rede. |
-| `problems` · `score` · `news` | Lista problemas (com os idiomas do enunciado de cada um) · mostra o placar · mostra avisos. |
+| `problems` · `score` · `news` | Lista problemas (com os idiomas do enunciado de cada um) · mostra o placar (placar anônimo: só o resumo — quantos resolveram quantos, por problema, quartis) · mostra avisos. |
 | `statement <letra> [--lang en\|es]` | Baixa um enunciado. Sem `--lang`, todos os idiomas oferecidos. Com um idioma que a prova não oferece, a CLI recusa e lista os disponíveis. |
 | `samples <letra> [--dir pasta]` | Baixa os exemplos do enunciado como arquivos: `samples/<letra>/<nome>.in` e `.out`. `fetch` já faz isso para todos os problemas (pasta `samples/` do kit). Um enunciado enviado pronto pela organização não tem exemplos como arquivo: a CLI avisa. |
 | `submit <letra> <arquivo> [--no-wait]` | Envia e espera o veredicto. Com `--no-wait`, envia e sai na hora. |
