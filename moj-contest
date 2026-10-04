@@ -49,11 +49,15 @@
 #       Fuso da prova (horas que o servidor escreve): tz=America/Santiago. tz= (vazio) = padrão.
 #   moj-contest -c <cid> extend <+min|epoch> [--group <regex> [--reason <txt>]]   Prorroga o fim.
 #   moj-contest -c <cid> problems ls | add <id> [--name N] [--letter L] | rm <letra>
-#                       | rename <letra> <nome> | reorder <L1> <L2> … | langs <letra> <l1,l2|->
+#                       | rename <letra> <nome> | titles [<letra>] | apply-titles [<letra>…]
+#                       | reorder <L1> <L2> … | langs <letra> <l1,l2|->
 #                       | judges <letra> <host1,host2|->   ('-' volta a herdar do contest)
 #                       | search <q> [--collection C] | draw [--collections "A,B"] [--tags a,b]
 #                         [--count n] [--difficulty d] [--match any|all] [--seed s] [--add]
 #                         [--include-private]   (soma os privados do DONO do contest; padrão: só públicos)
+#       Sem --name (add, draw --add, rounds problems) o nome é o título do banco no IDIOMA DA PROVA (senão o PT).
+#       `titles` lista os títulos PT/EN/ES de cada problema (troque com `rename`); `apply-titles` troca pelo
+#       título no idioma da prova o nome que é um título do banco em outro idioma (nome personalizado não muda).
 #   moj-contest -c <cid> users ls | add <login> [--pass P] [--name N] [--email E] | reset <login>
 #                       | rm <login> | disable <login> [--undo] | logout <login>
 #                       | set-password-all <senha> [--include-disabled]
@@ -391,6 +395,22 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg l "$1" '{action:"remove",letter:$l}')" | out '"ok: \((.problems//[])|length) problema(s)"';;
     rename) [[ $# -ge 2 ]] || die "uso: problems rename <letra> <nome>"
       api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg l "$1" --arg n "$2" '{action:"rename",letter:$l,name:$n}')" | out '"ok"';;
+    titles) # os títulos do banco por idioma (só quem tem enunciado traduzido tem mais de um)
+      local r; r="$(api GET "/contest/admin/problems$(qc)")"
+      [[ $# -ge 1 ]] && { jq -e --arg l "$1" 'any(.problems[]?; .letter == $l)' >/dev/null 2>&1 <<<"$r" || die "problema '$1' não está no contest"; }
+      jq -r '"idioma da prova (nome padrão): \(.name_lang // "pt" | ascii_upcase)"' <<<"$r" >&2
+      if [[ "${RAW:-0}" == 1 ]]; then printf '%s\n' "$r"; else
+        jq -r --arg one "${1:-}" '.name_lang as $nl | .problems[]? | select($one == "" or .letter == $one) | . as $p
+          | if (.titles // {}) == {} then "\(.letter)\t\(.name)\t(um título só)"
+            else "\(.letter)\t\(.name)\t\([ (.titles | to_entries[]) | "\(.key | ascii_upcase): \(.value)\(if .value == $p.name then " ←" else "" end)\(if .key == $nl then " *" else "" end)" ] | join(" · "))" end' <<<"$r" \
+          | { column -t -s$'\t' 2>/dev/null || cat; }
+      fi
+      echo "(← = nome atual; * = idioma da prova). Troque com: moj-contest -c ${CONTEST} problems rename <letra> \"<título>\"" >&2;;
+    apply-titles) # o botão da Central: nome = título do banco em OUTRO idioma ⇒ o do idioma da prova
+      local body='{"action":"apply_titles"}'
+      [[ $# -ge 1 ]] && body="$(printf '%s\n' "$@" | jq -R . | jq -cs '{action:"apply_titles", letters:.}')"
+      api POST "/contest/admin/problems$(qc)" "$body" \
+        | out 'if (.changed // []) == [] then "nada a trocar (nome personalizado ou já no idioma da prova)" else (.changed[] | "\(.letter): \(.name) → \(.to)") end';;
     reorder) [[ $# -ge 1 ]] || die "uso: problems reorder <L1> <L2> …"
       api POST "/contest/admin/problems$(qc)" "$(printf '%s\n' "$@" | jq -R . | jq -cs '{action:"reorder",order:.}')" | out '.problems[]? | "\(.letter)\t\(.name)"';;
     langs) [[ $# -ge 2 ]] || die "uso: problems langs <letra> <l1,l2|-> ('-' limpa: herda do contest)"
@@ -432,17 +452,19 @@ cmd_problems(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
         esac
       fi
       if [[ "$doadd" == 1 ]]; then
-        local pid nm priv
-        # o 🔒 é da TELA: vai num 3º campo, nunca no nome gravado no contest
-        while IFS=$'\t' read -r pid nm priv; do
+        local pid priv nm ar
+        # SEM nome: o servidor dá o título no idioma da prova (cc_prob_title) — o `.title` do sorteio é o PT.
+        # O 🔒 é da TELA: nunca vai no nome gravado no contest.
+        while IFS=$'\t' read -r pid priv; do
           [[ -n "$pid" ]] || continue
-          api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$pid" --arg nm "$nm" '{action:"add",problem:{bank_id:$id,name:$nm}}')" >/dev/null
-          echo "  + $pid ($nm)${priv:+ $priv}"
-        done < <(jq -r '.problems[]? | "\(.id)\t\(.title // .id)\t\(if .private then "🔒" else "" end)"' <<<"$r")
+          ar="$(api POST "/contest/admin/problems$(qc)" "$(jq -cn --arg id "$pid" '{action:"add",problem:{bank_id:$id}}')")"
+          nm="$(jq -r --arg id "$pid" '[.problems[]? | select(((.statement_key // .problem_id // "") | gsub("/"; "#")) == $id)] | last | .name // empty' <<<"$ar" 2>/dev/null)"
+          echo "  + $pid (${nm:-$pid})${priv:+ $priv}"
+        done < <(jq -r '.problems[]? | "\(.id)\t\(if .private then "🔒" else "" end)"' <<<"$r")
       else
         printf '%s' "$r" | out '.problems[]? | "\(.id)\(if .private then " 🔒" else "" end)\t\(.bucket)\t\(.title)\t\(if (.collections//[])|length>0 then .collections|join(",") else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; }
       fi;;
-    *) die "problems: sub desconhecido '$sub' (ls|add|rm|rename|reorder|langs|search|draw)";;
+    *) die "problems: sub desconhecido '$sub' (ls|add|rm|rename|titles|apply-titles|reorder|langs|judges|search|draw)";;
   esac; }
 cmd_users(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
@@ -857,7 +879,7 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       local cur; cur="$(api GET "/contest/admin/rounds$(qc)" | jq -c --arg s "$slug" '(.rounds[]?|select(.slug==$s)|.problems) // []')"
       [[ -n "$cur" ]] || die "rodada '$slug' não encontrada"
       case "$op" in
-        ls) jq -r '.[] | "\(.letter // "?")\t\(.name // "")\t\(.bank_id // .problem_id // "")"' <<<"$cur" \
+        ls) jq -r '.[] | "\(.letter // "?")\t\((.name // "") | if . == "" then "(automático: título no idioma da prova)" else . end)\t\(.bank_id // .problem_id // "")"' <<<"$cur" \
               | { column -t -s$'\t' 2>/dev/null || cat; }; return 0;;
         set) [[ $# -ge 1 ]] || die "uso: rounds problems <slug> set <id>[,<id>…]"
              cur="$(jq -cn --arg v "$1" '$v | split(",") | map(select(length>0)) | to_entries
