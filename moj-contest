@@ -670,7 +670,7 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       [[ "$types" == '[]' ]] && types='["info-sheet","contest","times"]'
       echo "gerando (converter PDF leva alguns segundos)…" >&2
       api POST "/contest/admin/docs$(qc)" "$(jq -cn --argjson t "$types" --argjson l "$langs" '{action:"generate",types:$t,langs:$l}')" \
-        | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang)|join(", ")))" else "" end)"';;
+        | out '"gerados: \(.counts.ok)\(if .counts.fail > 0 then "  FALHARAM: \(.counts.fail) (\((.failed//[])|map(.type+"."+.lang+(if .reason == "pdf" then " — a conversão p/ PDF falhou; segue o PDF anterior, se havia" else "" end))|join(", ")))" else "" end)"';;
     get|download)
       [[ $# -ge 1 ]] || die "uso: docs get <info|caderno|times|editorial|all> [--lang pt|en|es|both|all] [--fmt pdf|html|odt] [-o arquivo]"
       local what="$1" fmt=pdf outf="" langs=(pt) a; shift
@@ -709,9 +709,13 @@ cmd_docs(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
       while [[ $# -gt 0 ]]; do a="$1"; shift
         case "$a" in --lang) l="$(_doc_lang "$1")"; shift;; --news|--noticia) news=true;; *) die "opção desconhecida: $a";; esac
       done
-      api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg a "$sub" --arg t "$t" --arg l "$l" --argjson n "$news" \
-        '{action:$a,type:$t,lang:$l} + (if $a=="publish" then {news:$n} else {} end)')" \
-        | out '"ok — publicados: \(if ((.published//[])|length)>0 then (.published|join(", ")) else "(nenhum)" end)\(if .news then "  + notícia criada" else "" end)"';;
+      local r; r="$(api POST "/contest/admin/docs$(qc)" "$(jq -cn --arg a "$sub" --arg t "$t" --arg l "$l" --argjson n "$news" \
+        '{action:$a,type:$t,lang:$l} + (if $a=="publish" then {news:$n} else {} end)')")" || exit 1
+      out '"ok — publicados: \(if ((.published//[])|length)>0 then (.published|join(", ")) else "(nenhum)" end)\(if .news then "  + notícia criada" else "" end)\(if .available == "at_start" then "  (a sede e os times veem a partir do INÍCIO da prova)" else "" end)\(if (.news_removed // 0) > 0 then "  — \(.news_removed) notícia(s) com o anexo removida(s)" else "" end)"' <<<"$r"
+      # pediu notícia e o servidor não a criou: dizer (antes passava calado)
+      if [[ "$sub" == publish && "$news" == true && "$(jq -r '.news' <<<"$r" 2>/dev/null)" == false ]]; then
+        echo "atenção: a notícia NÃO foi criada" >&2
+      fi;;
     cover|capa)
       # docs cover <arquivo.pdf> [--lang pt]   |   docs cover --rm [--lang pt]
       local file="" rm=0 l=pt a
