@@ -167,6 +167,9 @@ cmd_whoami(){ need_contest; need_login
   api GET "/auth/status$(qc)" | out '"contest: '"$CONTEST"'  login: \(.login//"?")  nome: \(.name//"?")  admin: \(if .is_admin then "sim" else "não" end)"'; }
 
 # ---- criação / reuso (sessão do treino) ---------------------------------------------------
+# módulo que o servidor DESLIGOU na criação por faltar o pré-requisito (`modules_skipped`; hoje só o virtual, cujo
+# portão precisa do contest no disco) — sufixo do filtro de saída do create/duplicate
+JQ_SKIPPED=' + ((.modules_skipped // []) | map("\n  ⚠ módulo \(.id) ficou DESLIGADO: \(.message // .code) — ligue depois com: moj-contest -c <id> modules on \(.id)") | join(""))'
 cmd_create(){ need_login_t
   local specf="" tpl="" id="" name="" start="" end="" empty=0 mods="" mode="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
@@ -220,7 +223,7 @@ cmd_create(){ need_login_t
   fi
   [[ "$(jq -r '.end // empty' <<<"$spec")" ]] || die "faltou o fim: --end <epoch> (ou spec/template com end/duration)"
   local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
-  CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
+  CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'"$JQ_SKIPPED"
   rm -f "$tmp"
   [[ -z "$(jq -r '.users_from // empty' <<<"$spec")" ]] || _shared_warn; }
 # usuários COMPARTILHADOS do treino: as consequências que ninguém adivinha (o assistente da web pede "Entendi") — create e duplicate
@@ -253,7 +256,7 @@ cmd_duplicate(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest duplicate
       *) die "opção desconhecida: $a";;
     esac
   done
-  api_t POST "/treino/contest-create/duplicate" "$body" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else "" end)\n  url: \(.url)"' || return
+  api_t POST "/treino/contest-create/duplicate" "$body" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else "" end)\n  url: \(.url)"'"$JQ_SKIPPED" || return
   [[ -n "$(jq -r '.users_from // empty' <<<"$body")" ]] && _shared_warn; return 0; }
 cmd_template(){ need_login_t; local sub="${1:-list}"; shift || true
   case "$sub" in
@@ -319,7 +322,7 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
 cmd_modules(){ need_contest; need_login; local sub="${1:-list}"; shift || true
   case "$sub" in
     # 🔒 = falta o pré-requisito (o servidor recusa ligar com 422 — ex.: inscricoes sem as contas do treino)
-    list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)\(if .requires.ok == false then "\t🔒 \({requires_shared_users:"precisa das contas do treino (USERS_FROM)", editor_required:"precisa do editor embutido (Regras)"}[.requires.code] // .requires.code)" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)\(if .requires.ok == false then "\t🔒 \({requires_shared_users:"precisa das contas do treino (USERS_FROM)", editor_required:"precisa do editor embutido (Regras)", virtual_not_eligible:"virtual indisponível: \({problems_not_public:"há problema não público no treino", secret:"contest secreto", score_anon:"placar anônimo", type:"só no modo ICPC", window:"sem início e fim"}[.requires.reason // ""] // (.requires.reason // "?"))"}[.requires.code] // .requires.code)" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
     on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos)"
       local ids="$1"; [[ "$ids" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "ids separados por vírgula, sem espaço"
       api POST "/contest/admin/modules$(qc)" "$(jq -cn --arg k "$sub" --arg v "$ids" '{($k): ($v|split(","))}')" \
