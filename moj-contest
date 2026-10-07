@@ -30,7 +30,7 @@
 #       telao, classificacao, virtual (participação virtual: só liga com TODOS os problemas públicos
 #       no treino e contest não-secreto — senão 422 virtual_not_eligible), esqueletos (esqueleto de
 #       código no editor do time: só liga com o editor embutido — senão 422 editor_required).
-#       list mostra ligado/desligado e se há dados. Desligar não apaga dado.
+#       list mostra ligado/desligado, se há dados e (🔒) o pré-requisito que falta. Desligar não apaga dado.
 #       Prova de disciplina: nenhum. Prova com Maratona Linux: maquinas. Maratona: todos, menos
 #       virtual e esqueletos.
 #       Gravar o dado de um módulo (rounds add, cohorts add, ua-gate set, docs gen…) liga o
@@ -315,7 +315,8 @@ cmd_settings(){ need_contest; need_login; local sub="${1:-get}"; shift || true
 # ---- módulos do contest (Central › Módulos) --------------------------------------------------
 cmd_modules(){ need_contest; need_login; local sub="${1:-list}"; shift || true
   case "$sub" in
-    list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
+    # 🔒 = falta o pré-requisito (o servidor recusa ligar com 422 — ex.: inscricoes sem as contas do treino)
+    list|ls) api GET "/contest/admin/modules$(qc)" | out '.modules[] | "\(if .on then "on " else "off" end)\t\(.id)\t\(if .detected then "dados: \(.reason)" else "-" end)\(if .requires.ok == false then "\t🔒 \({requires_shared_users:"precisa das contas do treino (USERS_FROM)", editor_required:"precisa do editor embutido (Regras)"}[.requires.code] // .requires.code)" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
     on|off) [[ $# -ge 1 ]] || die "uso: modules $sub <id[,id…]>   (ids: sedes maquinas rodadas documentos baloes coortes inscricoes telao classificacao virtual esqueletos)"
       local ids="$1"; [[ "$ids" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "ids separados por vírgula, sem espaço"
       api POST "/contest/admin/modules$(qc)" "$(jq -cn --arg k "$sub" --arg v "$ids" '{($k): ($v|split(","))}')" \
