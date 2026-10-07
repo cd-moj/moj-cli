@@ -21,7 +21,7 @@
 #   moj-contest list                     Lista os contests criados por você.
 #   moj-contest show <cid>               Mostra o resumo de um contest, com os módulos ligados.
 #   moj-contest export <cid> [arquivo] [--full]   Grava o spec em um arquivo. Sem credenciais.
-#   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]   Copia um contest.
+#   moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E] [--users-from treino]   Copia um contest.
 #   moj-contest template list | show <nome> | save <nome> (--from-contest <cid> [--with-problems]
 #                      | --from-file f.json) | rm <nome> | rename <nome> <novo>   Gerencia templates.
 # Administração (exigem -c <cid> ou MOJ_CONTEST, e a sessão .admin do contest):
@@ -222,12 +222,12 @@ cmd_create(){ need_login_t
   local tmp; tmp="$(mktemp)"; printf '%s' "$spec" > "$tmp"
   CONTEST=treino api_post_file "/treino/contest-create/create" "$tmp" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else " (conta reutilizada)" end)\n  url: \(.url)"'
   rm -f "$tmp"
-  # usuários COMPARTILHADOS do treino: as consequências que ninguém adivinha (o assistente da web pede "Entendi")
-  if [[ -n "$(jq -r '.users_from // empty' <<<"$spec")" ]]; then
-    printf '%s\n' "⚠ usuários COMPARTILHADOS do treino: login e senha são os do Treino Livre (você não vê nem redefine;" \
-      "  etiquetas sem senha); qualquer conta de lá entra se a inscrição estiver desligada; juiz/staff = contas" \
-      "  próprias (users add). Para prova: moj-contest -c <id> users convert (prévia) e --apply — sem volta." >&2
-  fi; }
+  [[ -z "$(jq -r '.users_from // empty' <<<"$spec")" ]] || _shared_warn; }
+# usuários COMPARTILHADOS do treino: as consequências que ninguém adivinha (o assistente da web pede "Entendi") — create e duplicate
+_shared_warn(){
+  printf '%s\n' "⚠ usuários COMPARTILHADOS do treino: login e senha são os do Treino Livre (você não vê nem redefine;" \
+    "  etiquetas sem senha); qualquer conta de lá entra se a inscrição estiver desligada; juiz/staff = contas" \
+    "  próprias (users add). Para prova: moj-contest -c <id> users convert (prévia) e --apply — sem volta." >&2; }
 cmd_list(){ need_login_t
   api_t GET "/treino/contest-create/mine" | out '.contests[]? | "\(.id)\t\(.mode)\t\(.problems_count) probs\t\(.name)"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_show(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest show <cid>"
@@ -239,7 +239,7 @@ cmd_export(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest export <cid>
   [[ -n "$outf" ]] || outf="$cid-spec.json"
   CONTEST=treino api_get_to_file "/treino/contest-create/export?id=$(enc "$cid")$full" "$outf"
   echo "exportado: $outf ($(wc -c < "$outf") bytes)"; }
-cmd_duplicate(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E]"
+cmd_duplicate(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest duplicate <cid> [--id X] [--name N] [--start E] [--end E] [--users-from treino]"
   local from="$1" body='{}' a; shift
   body="$(jq -cn --arg f "$from" '{from:$f}')"
   while [[ $# -gt 0 ]]; do a="$1"; shift
@@ -248,10 +248,13 @@ cmd_duplicate(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest duplicate
       --name) body="$(jq -c --arg v "$1" '.name=$v' <<<"$body")"; shift;;
       --start) body="$(jq -c --argjson v "$1" '.start=$v' <<<"$body")"; shift;;
       --end) body="$(jq -c --argjson v "$1" '.end=$v' <<<"$body")"; shift;;
+      # a cópia NUNCA herda o compartilhamento (o servidor só o aplica se vier aqui); contest com inscrição exige
+      --users-from) body="$(jq -c --arg v "$1" '.users_from=$v' <<<"$body")"; shift;;
       *) die "opção desconhecida: $a";;
     esac
   done
-  api_t POST "/treino/contest-create/duplicate" "$body" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else "" end)\n  url: \(.url)"'; }
+  api_t POST "/treino/contest-create/duplicate" "$body" | out '"criado: \(.contest_id)  admin: \(.admin_login)\(if .admin_password then "  senha: \(.admin_password)" else "" end)\n  url: \(.url)"' || return
+  [[ -n "$(jq -r '.users_from // empty' <<<"$body")" ]] && _shared_warn; return 0; }
 cmd_template(){ need_login_t; local sub="${1:-list}"; shift || true
   case "$sub" in
     list|ls) api_t GET "/treino/contest-create/templates" | out '.templates[]? | "\(.name)\t\(.mode//"?")\t\(if .duration then "\(.duration/3600|floor)h" else "-" end)\t\(if .has_problems then "com problemas" else "" end)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
