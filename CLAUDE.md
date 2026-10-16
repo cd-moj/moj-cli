@@ -23,6 +23,12 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   m:n, ORTOGONAL à org; nome pode ter espaços; curada: só marca em coleção existente).
 - Config por ambiente: `MOJ_URL` (default `https://moj.naquadah.com.br`), `MOJ_HOST` (header
   `Host` p/ teste local), `EDITOR`.
+- **ENDEREÇO DO CONTEST (16/10/2026)**: o servidor recusa sessão de TIME fora do subdomínio do contest (403
+  `host_required`, `cdmoj/server/api/v1/lib/team-host.sh`). `lib/core.sh`: `MOJ_BASE_URL` (o site principal, o
+  `MOJ_URL` sem rótulo de contest) e `moj_contest_target`/`moj_use_contest <cid>` (`https://<cid>.<host>`; treino,
+  id que não vira rótulo e servidor fora do `moj.*` ficam na base; com `MOJ_HOST`, o Host vira `<cid>.<MOJ_HOST>`).
+  O `moj-comp` liga o endereço da prova na largada e no login; o `login <url>` RECUSA URL de outro servidor (a senha
+  iria p/ ela). `moj-contest seed --live` loga os times pelo subdomínio. Teste: `test/comp-host.sh`.
 - É um **cliente** da API — não tem lógica de julgamento própria. **O formato de pacote tem fonte
   única: `cdmoj/docs/PACOTE.md`** (inclusive o `.moj-id`, que é ESTE repo quem escreve e que **não**
   sobe ao servidor). **Título = campo** (`.moj-id` `.title` → `display_title`), **não** o `% Título`

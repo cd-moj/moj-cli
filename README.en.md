@@ -285,6 +285,13 @@ site account. Then use `problems <search>`, `statement <org#slug> [--lang en]` (
 and one `slug.<lang>.html` per translation), `submit <org#slug> <file>` and `subs`. The training
 guide is at `/treino/cli.html`.
 
+**Contest address.** A team logs in only at the contest address: `https://<cid>.moj.naquadah.com.br`. The server
+refuses a team at another address (the IP or the main site) with `HTTP 403` and the code `host_required`. The CLI uses
+the contest address by itself, for every contest command. Open training stays on the main site. `login <url>` accepts
+the contest URL or `…/contest/?c=<cid>`, only from this server. With a URL from another server, the CLI refuses and
+does not send the password. To test against a local server, use `MOJ_HOST`: the CLI changes the `Host` to
+`<cid>.<MOJ_HOST>`.
+
 **Queue limit.** In open training and in list contests, an account has at most 3 submissions waiting for a
 verdict. The 4th one gets `HTTP 429` with the server message. Wait for a result and submit again. An error
 response from the server never becomes an offline package.

@@ -45,6 +45,32 @@ case "$_ua_tool" in moj|moj-comp|moj-contest|moj-judges) ;; *) _ua_tool="${MOJ_T
 MOJ_UA="${MOJ_UA_BASE:+$MOJ_UA_BASE }$_ua_tool/$MOJ_CLI_BUILD"
 HDR+=(-A "$MOJ_UA")
 have(){ command -v "$1" >/dev/null 2>&1; }
+
+# ---- O ENDEREÇO DO CONTEST (16/10/2026) -----------------------------------------------------
+# TIME só entra pelo subdomínio do contest — https://<cid>.moj.naquadah.com.br —, e o servidor recusa a sessão de time
+# fora dele (403 host_required). MOJ_BASE_URL = o site principal (o MOJ_URL sem um rótulo de contest na frente): o
+# treino e as ferramentas de autor/admin seguem nele.
+_moj_url_host(){ local r="${1#*://}"; printf '%s' "${r%%/*}"; }        # host[:porta] de uma URL
+_moj_is_base(){ [[ "${1%%:*}" =~ ^(new)?moj\. ]]; }                    # moj.* / newmoj.* (a porta não conta)
+MOJ_BASE_URL="${MOJ_URL%/}"
+_mh="$(_moj_url_host "$MOJ_BASE_URL")"
+[[ "$_mh" =~ ^[a-z0-9][a-z0-9_-]*\.((new)?moj\..*)$ ]] && MOJ_BASE_URL="${MOJ_BASE_URL%%://*}://${BASH_REMATCH[1]}"
+unset _mh
+# moj_contest_target <cid> — o endereço da prova em MOJ_CT_URL e os cabeçalhos do curl em MOJ_CT_HDR. Treino, id que não
+# vira subdomínio, ou site fora do moj.* (IP, localhost) → o site principal. Com MOJ_HOST (teste local:
+# MOJ_URL=http://127.0.0.1…), a URL fica e o Host vira <cid>.<MOJ_HOST>.
+moj_contest_target(){
+  local c="$1" h; MOJ_CT_URL="$MOJ_BASE_URL"; MOJ_CT_HDR=()
+  if [[ "$c" != treino && "$c" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]; then
+    if [[ -n "${MOJ_HOST:-}" ]]; then _moj_is_base "$MOJ_HOST" && MOJ_CT_HDR=(-H "Host: $c.$MOJ_HOST")
+    else h="$(_moj_url_host "$MOJ_BASE_URL")"; _moj_is_base "$h" && MOJ_CT_URL="${MOJ_BASE_URL%%://*}://$c.$h"; fi
+  fi
+  [[ ${#MOJ_CT_HDR[@]} -eq 0 && -n "${MOJ_HOST:-}" ]] && MOJ_CT_HDR=(-H "Host: $MOJ_HOST")
+  MOJ_CT_HDR+=(-A "$MOJ_UA")
+  return 0
+}
+# moj_use_contest <cid> — daqui em diante, fala com o endereço da prova (MOJ_URL e HDR)
+moj_use_contest(){ moj_contest_target "$1"; MOJ_URL="$MOJ_CT_URL"; HDR=("${MOJ_CT_HDR[@]}"); }
 have jq || die "preciso do 'jq'."; have curl || die "preciso do 'curl'."
 
 # ---- helpers PORTÁVEIS (Linux/GNU e macOS/BSD) --------------------------------------------
@@ -174,6 +200,12 @@ _api_fail(){
   [[ -n "$_bl" ]] && msg="$msg
 $_bl"
   # gate de navegador por sede: a CLI só entra na MÁQUINA DE PROVA (lê /etc/moj/user-agent)
+  # time fora do endereço do contest (o servidor diz qual é): a CLI nova já fala com ele — a antiga, não
+  if [[ "$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)" == host_required ]]; then
+    msg="$msg
+  o time entra pelo endereço do contest: $(jq -r '.error.url // empty' <<<"$out" 2>/dev/null || true)
+  rode '$MOJ_TOOL update' e '$MOJ_TOOL login <cid>' de novo."
+  fi
   if [[ "$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)" == ua_gate ]]; then
     msg="$msg
   este contest só aceita o navegador da imagem da sede. Rode a CLI NA MÁQUINA DE PROVA (ela lê o

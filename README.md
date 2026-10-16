@@ -285,6 +285,12 @@ site. Depois use `problems <busca>`, `statement <org#slug> [--lang en]` (grava `
 `submit <org#slug> <arquivo>` e `subs`. O guia do treino está em
 `/treino/cli.html`.
 
+**Endereço do contest.** O time só entra pelo endereço do contest: `https://<cid>.moj.naquadah.com.br`. O servidor
+recusa o time por outro endereço (o IP ou o site principal) com `HTTP 403` e o código `host_required`. A CLI usa o
+endereço do contest sozinha, para todos os comandos da prova. O treino fica no site principal. O `login <url>` aceita
+a URL do contest ou `…/contest/?c=<cid>`, só deste servidor. Com URL de outro servidor, a CLI recusa e não envia a
+senha. Para testar contra um servidor local, use `MOJ_HOST`: a CLI troca o `Host` por `<cid>.<MOJ_HOST>`.
+
 **Limite de envios na fila.** No treino e nos contests de lista, a conta tem no máximo 3 envios esperando
 veredicto. O 4º recebe `HTTP 429` com a mensagem do servidor. Espere sair um resultado e envie de novo. Uma
 resposta de erro do servidor nunca vira pacote offline.

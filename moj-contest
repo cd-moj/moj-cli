@@ -1145,11 +1145,14 @@ int main(void){ int n,s=0,x; if(scanf("%d",&n)!=1) return 1; while(n--){ if(scan
        '#include <stdio.h>
 int main(void){ for(;;); return 0; }')
   hdrf="$(mktemp)"; chmod 600 "$hdrf"
+  # os TIMES entram pelo endereço do contest (o servidor recusa o time fora dele — host_required); o admin segue no
+  # site principal (lib/core.sh moj_contest_target)
+  moj_contest_target "$CONTEST"
   for ((i=1; i<=n; i++)); do
     local login; login="$(printf 'time-%02d' $(( (i - 1) % 20 + 1 )))"
     tok="$(jq -n --arg u "$login" --arg p "$pw" '{username:$u,password:$p}' \
-           | curl -sS "${HDR[@]}" -X POST -H 'Content-Type: application/json' --data-binary @- \
-                  "$MOJ_URL/api/v1/auth/login?contest=$(enc "$CONTEST")" 2>/dev/null \
+           | curl -sS "${MOJ_CT_HDR[@]}" -X POST -H 'Content-Type: application/json' --data-binary @- \
+                  "$MOJ_CT_URL/api/v1/auth/login?contest=$(enc "$CONTEST")" 2>/dev/null \
            | jq -r '.token // empty')"
     [[ -n "$tok" ]] || { echo "  $login: login falhou (a senha é a que o seed devolveu)" >&2; continue; }
     printf 'Authorization: Bearer %s\n' "$tok" > "$hdrf"
@@ -1157,8 +1160,8 @@ int main(void){ for(;;); return 0; }')
     b64="$(_b64tmp "$tmp")"
     r="$(jq -cn --arg p "${LET[k]}" --arg f sol.c --rawfile b "$b64" \
           '{problem_id:$p, filename:$f, code_b64:($b|rtrimstr("\n"))}' \
-         | curl -sS "${HDR[@]}" -H "@$hdrf" -X POST -H 'Content-Type: application/json' \
-                --data-binary @- "$MOJ_URL/api/v1/submit?contest=$(enc "$CONTEST")" 2>/dev/null)"
+         | curl -sS "${MOJ_CT_HDR[@]}" -H "@$hdrf" -X POST -H 'Content-Type: application/json' \
+                --data-binary @- "$MOJ_CT_URL/api/v1/submit?contest=$(enc "$CONTEST")" 2>/dev/null)"
     rm -f "$tmp" "$b64"
     printf '  %s -> %s: %s\n' "$login" "${LET[k]}" \
       "$(jq -r '.status // .error.message // "?"' <<<"$r" 2>/dev/null)"
