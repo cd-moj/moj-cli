@@ -119,7 +119,7 @@
 #       Documentos da prova: info sheet, caderno e folha de time limits, em PDF e HTML, pt/en/es.
 #       ls e get funcionam com qualquer conta do contest e mostram só o publicado.
 #       gen, publish e cover exigem .admin ou .cjudge.
-#   moj-contest remove <cid>             Tira o contest do ar. Exige .admin do treino.
+#   moj-contest remove <cid>             Tira o contest do ar. Só o dono do contest ou o super-admin.
 #   moj-contest priority <cid> <lista-publica|lista-privada|prova|super>   Muda a prioridade no julgamento.
 #       Exige o SUPER-ADMIN do treino (é o único caminho para Super). O admin do contest muda as outras com
 #       `settings set priority=prova`. A mudança fica na auditoria do contest e na do treino.
@@ -284,9 +284,11 @@ cmd_template(){ need_login_t; local sub="${1:-list}"; shift || true
     rename) [[ $# -ge 2 ]] || die "uso: template rename <nome> <novo>"; api_t POST "/treino/contest-create/templates" "$(jq -cn --arg n "$1" --arg m "$2" '{op:"rename",name:$n,new_name:$m}')" | out '"renomeado p/: \(.name)"';;
     *) die "template: sub desconhecido '$sub' (list|show|save|rm|rename)";;
   esac; }
-cmd_remove(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest remove <cid>   (tira do ar; exige .admin do treino)"
+# remove <cid> — tira o contest do ar (lixeira, reversível pelo servidor). Só o DONO do contest ou o super-admin, e o
+# servidor exige o id digitado no corpo (`confirm`) desde 16/10/2026: a confirmação era só desta CLI e da tela.
+cmd_remove(){ need_login_t; [[ $# -ge 1 ]] || die "uso: moj-contest remove <cid>   (tira do ar; o dono do contest ou o super-admin)"
   local c; read -rp "confirme digitando o id ($1): " c || true; [[ "$c" == "$1" ]] || die "não confere."
-  api_t POST "/treino/admin/contest-remove" "$(jq -cn --arg c "$1" '{contest:$c}')" | out '"removido (lixeira): \(.trash // "ok")"'; }
+  api_t POST "/treino/admin/contest-remove" "$(jq -cn --arg c "$1" --arg k "$c" '{contest:$c, confirm:$k}')" | out '"removido (lixeira): \(.trash // "ok")"'; }
 
 # ---- administração (sessão do contest) ----------------------------------------------------
 # priority <cid> <p> — a prioridade no julgamento pelo Painel do treino (SUPER-ADMIN; a sessão é a do treino)

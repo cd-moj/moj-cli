@@ -46,7 +46,7 @@ A CLI tem quatro camadas. Cada camada é um executável. Baixe só o que você u
 | `moj` | autor de problemas | comando acima |
 | `moj-contest` | organizador de contest (`moj contest …` delega aqui) | `curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest` |
 | `moj-comp` | competidor ou aluno (`moj comp …` delega aqui). É a única camada com o **modo offline** | `curl -fsSL https://moj.naquadah.com.br/moj-comp -o ~/.local/bin/moj-comp && chmod +x ~/.local/bin/moj-comp` |
-| `moj-judges` | admin do parque de juízes (`moj judges …` delega aqui): `ls`/`show` mostram slots, CPUs por slot, slots por nó NUMA, SMT e o `hold` (juiz segurado p/ um job largo); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = política global de testes em paralelo (em prova: `off`) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
+| `moj-judges` | admin do parque de juízes (`moj judges …` delega aqui): `ls`/`show` mostram slots, CPUs por slot, slots por nó NUMA, SMT e o `hold` (juiz segurado p/ um job largo); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = política global de testes em paralelo (em prova: `off`). Ler é do admin do treino; mudar é só do super-admin | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
 
 Os arquivos servidos são autocontidos. O script `mkdist.sh` gera cada um a partir de `lib/core.sh`
 e da camada. Quando você roda do repositório, cada script carrega `lib/core.sh` diretamente.
@@ -341,7 +341,7 @@ O contest alvo vem de `-c <cid>` ou de `MOJ_CONTEST`.
 | `docs upload <tipo> <doc.pdf> [--lang pt]` · `docs upload <tipo> --rm` | Sobe o documento pronto. Ele vence o gerado. `--rm` volta ao gerado. | `moj-contest -c lab1 docs upload caderno final.pdf` |
 | `docs set caderno_version=v1.2 [errata=…] [cover_note=…] [samples_table=true\|false]` · `docs text <info\|capa> [--show\|--from arq\|--reset]` | Edita dados e textos dos documentos. `samples_table=true` põe os exemplos do caderno em tabela "Exemplo de entrada N \| Exemplo de saída N" (molde da SBC); o padrão são as caixas empilhadas, como no site — exemplo com linhas longas fica melhor assim. Os textos são Markdown com marcadores `{{…}}`. `text capa --show` mostra a capa padrão do MOJ enquanto ela não foi editada (a capa padrão também é um texto); `--reset` volta ao padrão. | `moj-contest -c lab1 docs set caderno_version=v1.1` |
 | `seed [--teams N] [--subs N] [--seed S]` | Povoa um contest de demonstração (`DEMO=1`) com dados sintéticos. | `moj-contest -c demo seed --teams 20` |
-| `remove <cid>` | Tira o contest do ar. Exige `.admin` do treino. | `moj-contest remove lab1` |
+| `remove <cid>` | Tira o contest do ar. Só o dono do contest ou o super-admin. Digite o id para confirmar. | `moj-contest remove lab1` |
 | `priority <cid> <prioridade>` | Muda a prioridade no julgamento: `lista-publica`, `lista-privada`, `prova` ou `super`. Exige o super-admin do treino. É o único caminho para `super`. A mudança fica na auditoria do contest e na do treino. | `moj-contest priority maratona super` |
 
 ### O spec de criação e os módulos

@@ -45,7 +45,7 @@ The CLI has four layers. Each layer is one executable. Download only what you us
 | `moj` | problem author | command above |
 | `moj-contest` | contest organizer (`moj contest …` delegates here) | `curl -fsSL https://moj.naquadah.com.br/moj-contest -o ~/.local/bin/moj-contest && chmod +x ~/.local/bin/moj-contest` |
 | `moj-comp` | competitor or student (`moj comp …` delegates here). It is the only layer with the **offline mode** | `curl -fsSL https://moj.naquadah.com.br/moj-comp -o ~/.local/bin/moj-comp && chmod +x ~/.local/bin/moj-comp` |
-| `moj-judges` | admin of the judge fleet (`moj judges …` delegates here): `ls`/`show` show slots, CPUs per slot, slots per NUMA node, SMT and the `hold` (a judge held for a wide job); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = global policy of parallel tests (in contests: `off`) | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
+| `moj-judges` | admin of the judge fleet (`moj judges …` delegates here): `ls`/`show` show slots, CPUs per slot, slots per NUMA node, SMT and the `hold` (a judge held for a wide job); `config <host> --parallel-max N`; `parallel off\|auto [--cushion F] [--share F]` = global policy of parallel tests (in contests: `off`). A training admin reads; only the super-admin changes | `curl -fsSL https://moj.naquadah.com.br/moj-judges -o ~/.local/bin/moj-judges && chmod +x ~/.local/bin/moj-judges` |
 
 The served files are self-contained. The script `mkdist.sh` builds each one from `lib/core.sh` and
 the layer. When you run from the repository, each script loads `lib/core.sh` directly.
@@ -341,7 +341,7 @@ The target contest comes from `-c <cid>` or from `MOJ_CONTEST`.
 | `docs upload <type> <doc.pdf> [--lang pt]` · `docs upload <type> --rm` | Uploads the finished document. It wins over the generated one. `--rm` returns to the generated one. | `moj-contest -c lab1 docs upload caderno final.pdf` |
 | `docs set caderno_version=v1.2 [errata=…] [cover_note=…] [samples_table=true\|false]` · `docs text <info\|capa> [--show\|--from file\|--reset]` | Edits document data and texts. `samples_table=true` lays out the problem set samples as a "Sample input N \| Sample output N" table (SBC mold); the default is stacked boxes, like on the site — samples with long lines look better that way. Texts are Markdown with `{{…}}` markers. `text capa --show` prints the MOJ default cover while it has not been edited (the default cover is a text too); `--reset` goes back to the default. | `moj-contest -c lab1 docs set caderno_version=v1.1` |
 | `seed [--teams N] [--subs N] [--seed S]` | Populates a demo contest (`DEMO=1`) with synthetic data. | `moj-contest -c demo seed --teams 20` |
-| `remove <cid>` | Takes the contest off the air. It requires a training `.admin`. | `moj-contest remove lab1` |
+| `remove <cid>` | Takes the contest off the air. Only the contest owner or the super-admin can do it. Type the id to confirm. | `moj-contest remove lab1` |
 | `priority <cid> <priority>` | Changes the judging priority: `lista-publica`, `lista-privada`, `prova` or `super`. It requires the training super-admin. It is the only path to `super`. The change goes to the audit log of the contest and of the training. | `moj-contest priority maratona super` |
 
 ### The creation spec and the modules

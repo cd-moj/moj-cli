@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # moj-judges — CLI de gerência dos juízes do MOJ (camada 'judges'; `moj judges …` delega aqui).
 # Tudo pela API, com a sessão .admin do treino (`moj login`). O servidor aplica o corte.
+# Ler (ls, show, results, queue, status, config e parallel sem argumentos) é do admin do treino.
+# Mudar (config com flags, parallel off|auto, clearcache, reset, restart, cancel) é só do SUPER-ADMIN
+# (SUPERADMINS no conf do treino). Os outros recebem "Só o super-admin da plataforma pode fazer isto".
 #
 #   moj-judges ls                        Mostra a saúde: host, slots ocupados/total, partição, cache, TLs.
 #   moj-judges show <host>               Mostra o detalhe: specs, config, jobs correntes, calibrações na fila.
