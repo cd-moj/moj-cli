@@ -1063,13 +1063,27 @@ cmd_push(){ need_login
   # a TRAVA vai no corpo: base_rev (o que você tinha) ou force (--overwrite). Sem base_rev (pasta de
   # antes desta versão) o servidor se comporta como sempre: grava por cima.
   local lockf='. + (if $ow then {force:true} elif $b != "" then {base_rev:$b} else {} end)'
-  if [[ "$(http_code GET "/problems/get?id=$(enc "$id")")" == 2* ]]; then
+  # O PROBLEMA JÁ EXISTE? Só o 404 quer dizer "novo". Até 16/10/2026 QUALQUER falha desta consulta (401 de
+  # sessão derrubada, 5xx, rede) caía no ramo de criação, e lá o pedido de criar a org — com a saída
+  # descartada — morria no `die` do 401: o push saía com 1 SEM MENSAGEM, de problema novo E de existente
+  # (Daniel Saad: um "deslogar" em massa no painel do treino levou junto a sessão da CLI dele).
+  local gc; gc="$(http_code GET "/problems/get?id=$(enc "$id")")"
+  case "$gc" in
+    2*|404) ;;
+    401) rm -f "$bf" "$bf2"; die "sua sessão não vale mais (HTTP 401: expirou ou foi encerrada) — rode 'moj login' e repita o push. Nada foi enviado." ;;
+    000|'') rm -f "$bf" "$bf2"; die "não consegui falar com $MOJ_URL (rede? URL?) — nada foi enviado." ;;
+    *) rm -f "$bf" "$bf2"; die "não consegui conferir se '$id' já existe no servidor (HTTP $gc) — nada foi enviado; tente de novo." ;;
+  esac
+  if [[ "$gc" == 2* ]]; then
     jq -c --arg id "$id" --arg b "$base" --argjson ow "$ow" ". + {id:\$id} | $lockf" "$bf" > "$bf2"
     resp="$(_post_rev "/problems/edit" "$bf2" "moj push --overwrite")" || { rm -f "$bf" "$bf2"; exit 1; }
     jq -r '"enviado (edit): \(.id)  sha \(.sha)"' <<<"$resp"
     _base_after_send "$d" "$resp"
   else
-    api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
+    # criar a org é só garantia (ela costuma existir: 409 "Org já existe" p/ quem é membro e não admin).
+    # API_SOFT=1: a falha volta como rc em vez de `die` — o `|| true` sozinho não segura um `exit`, e com a
+    # saída descartada o push morria calado. Se for falha de verdade, a criação logo abaixo a mostra.
+    API_SOFT=1 api POST "/problems/repo-create" "$(jq -n --arg r "$repo" '{repo:$r}')" >/dev/null 2>&1 || true
     jq -c --arg r "$repo" --arg p "$prob" '. + {repo:$r,prob:$p}' "$bf" > "$bf2"
     # resposta via ARQUIVO, não $(…): o command substitution roda num SUBSHELL e
     # API_LAST_CODE/API_LAST_BODY não chegariam ao elif/else abaixo
@@ -1788,7 +1802,12 @@ cmd_edit(){ need_login; local arg="${1:-}"
       r) local act u; act="$(ask '  [a]dd ou [r]emove colaborador? ')"; u="$(ask '  login: ')"; [[ -n "$u" ]] && { [[ "$act" == r ]] && cmd_unshare "$(mid "$D" repo)" "$u" || cmd_share "$(mid "$D" repo)" "$u"; };;
       v) local pl; pl="$(ask '  idioma do preview (pt/en/es): ' pt)"; cmd_preview "$D" --lang "${pl:-pt}";;
       t) edit_trans "$D";; e) edit_editorial "$D";;
-      w) cmd_push "$D"; local want; want="$(mid "$D" public)"; cmd_public "$id" "$([[ "$want" == true ]] && echo on || echo off)" >/dev/null 2>&1 || true; echo "  salvo.";;
+      # o ajuste do público vai num SUBSHELL: um `die` dentro dele (com a saída descartada) encerrava o `moj edit`
+      # inteiro sem mensagem — a mesma classe do push calado de 16/10/2026
+      w) cmd_push "$D"; local want; want="$(mid "$D" public)"
+         ( cmd_public "$id" "$([[ "$want" == true ]] && echo on || echo off)" ) >/dev/null 2>&1 \
+           || echo "  ⚠ salvo, mas não consegui ajustar o público agora — confira com 'moj status $id'."
+         echo "  salvo.";;
       P) cmd_push "$D" >/dev/null && cmd_publish "$id";;
       i) cmd_status "$id";;
       q) echo "até mais."; return;;

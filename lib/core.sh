@@ -225,9 +225,12 @@ api_get_cached(){ local ttl="$1" p="$2" cf age out
   out="$(api GET "$p")" || return 1
   ( umask 077; mkdir -p "$(dirname "$cf")" 2>/dev/null; printf '%s' "$out" > "$cf" ) 2>/dev/null
   printf '%s' "$out"; }
-http_code(){ local m="$1" p="$2" auth=() hf
+# sem rede o curl JÁ imprime "000" pelo -w e sai com erro: o `|| echo 000` de antes emendava outro e devolvia
+# "000000" (a mensagem do push dizia "HTTP 000000") — o código sai uma vez só, e vazio vira 000
+http_code(){ local m="$1" p="$2" auth=() hf c
   hf="$(auth_hdr_file 2>/dev/null || true)"; [[ -n "$hf" ]] && auth=(-H "@$hf")
-  curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null || echo 000; }
+  c="$(curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" "${auth[@]}" -X "$m" "$MOJ_URL/api/v1$p" 2>/dev/null)" || true
+  printf '%s' "${c:-000}"; }
 api_post_file(){ # api_post_file PATH BODYFILE -> POST grande (corpo via arquivo; evita ARG_MAX)
   # NUNCA chame dentro de um pipe (`api_post_file … | jq`): o `die` mata só o subshell, o `jq` da
   # ponta sai 0 e o push FALHAVA COM rc=0 — script nenhum detectava. Use `resp="$(api_post_file …)"`.
