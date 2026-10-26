@@ -7,7 +7,7 @@
 #   · conf_get/conf_set leem e preservam a ÚLTIMA linha sem \n final (o conf_set a apagava ao regravar);
 #   · `moj calib`/`moj check` mostram os dois métodos (JSON de um /problems/calib real do servidor novo) e, com
 #     o servidor antigo (sem os campos), saem como antes;
-#   · os textos novos do _RDY_JQ (as margens do Kattis, "não medido");
+#   · os textos novos do _RDY_JQ (as margens do Kattis, "não medido") e a linha do TLMOD sum/mult (`tl_mods`);
 #   · `moj test --run` grava as duas metades na tabela local (build-and-test FALSO; sem bwrap de verdade).
 set -u
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"; CLI="$(cd "$HERE/.." && pwd)"
@@ -102,6 +102,17 @@ ck "calib: o porquê pelo outro método só quando difere (aqui, todos conformes
 out="$(cmd_check 'col#pa' 2>&1)"
 ck "check: a linha do método e o TL do outro"   '[[ "$out" == *"método do TL: Kattis (a=2 b=1.5 r=1) · pelo MOJ: c=0.4s"* ]]'
 ck "check: por máquina, a metade do método do conf" '[[ "$out" == *"juiz1: c=1   · MOJ: c=.3035"* && "$out" == *"juiz2: (sem TL)   (falta: c)   · MOJ: c=.4"* ]]'
+echo "== TLMOD sum/mult do conf (tl_mods, 26/10/2026): o TL já vem com o ajuste e a linha diz qual =="
+cp "$T/calib.json" "$T/calib.nomods.json"; cp "$T/tl.json" "$T/tl.nomods.json"
+jq -c '.tl_mods = {"sum":{"spim":2.0},"mult":{"cpp":1.5}}' "$T/calib.nomods.json" > "$T/calib.json"
+jq -c '.tl_mods = {"sum":{"spim":2.0},"mult":{"cpp":1.5}}' "$T/tl.nomods.json" > "$T/tl.json"
+out="$(cmd_calib 'col#pa' 2>&1)"
+ck "calib: a linha do TLMOD (o 2.0 sai 2 em todo jq)" '[[ "$out" == *"⚙ TLMOD no conf (já incluído no TL): cpp×1.5 spim+2s"* ]]'
+out="$(cmd_check 'col#pa' 2>&1)"
+ck "check: a linha do TLMOD"                    '[[ "$out" == *"⚙ TLMOD no conf (o juiz soma/multiplica por cima do calibrado; o TL acima já inclui): cpp×1.5 spim+2s"* ]]'
+mv "$T/calib.nomods.json" "$T/calib.json"; mv "$T/tl.nomods.json" "$T/tl.json"
+out="$(cmd_calib 'col#pa' 2>&1)"; out2="$(cmd_check 'col#pa' 2>&1)"
+ck "sem tl_mods (servidor anterior): nenhuma linha de TLMOD" '[[ "$out" != *TLMOD* && "$out2" != *TLMOD* ]]'
 cp "$T/calib.json" "$T/calib.kattis.json"
 jq -c '.tl_method = "moj" | .hosts |= map(.sols |= map(.expect as $e | .expect = .expect_alt | .expect_alt = $e))' "$T/calib.kattis.json" > "$T/calib.json"
 out="$(cmd_calib 'col#pa' 2>&1)"

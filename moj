@@ -430,6 +430,10 @@ def r2: if type == "number" then (. * 100 | round / 100) else . end;
 # os parâmetros do Kattis ({a,b,r} do servidor). `. + 0` normaliza o número: o jq 1.7+ imprime o literal 2.0 como
 # veio, o 1.6 (Ubuntu 22.04, muitos Macs) imprime 2 — sem isto a linha mudava com o jq do usuário
 def n0: if type == "number" then . + 0 else . end;
+# TLMOD[<lang>.sum|.mult] do conf (o `tl_mods` das rotas, cdmoj docs/PACOTE.md): "spim+1s cpp×1.5"; "" sem ajuste
+def tlmods: (.sum // {}) as $s | (.mult // {}) as $x | ((($s | keys) + ($x | keys)) | unique)
+  | map(. as $l | $l + (if $s[$l] != null then (if $s[$l] < 0 then "" else "+" end) + "\($s[$l] | n0)s" else "" end)
+                     + (if $x[$l] != null then "×\($x[$l] | n0)" else "" end)) | join(" ");
 def kpar: (. // {}) as $k | "(a=\($k.a // 2 | n0) b=\($k.b // 1.5 | n0) r=\($k.r // 1 | n0))";
 def xwant: if . == "good" then "esperado: aceita em todos os testes, dentro do TL que o juiz cobra"
   elif . == "pass" then "esperado: aceita em todos os testes, dentro do TL"
@@ -659,6 +663,9 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
          | if length == 0 then "" else " · pelo \($o | mname): " + (map("\(.key)=\(.value)s") | join(" ")) end)' <<<"$tt" 2>/dev/null || true
   # TLOVERRIDE do conf: o autor mandou no TL — o exibido acima JÁ é o efetivo
   jq -r 'if (.tl_override // {}) != {} then "  ⚙ TL OVERRIDE no conf (vence o calibrado): " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else empty end' <<<"$tt" 2>/dev/null
+  # TLMOD sum/mult do conf: o juiz soma/multiplica por cima do calibrado — o exibido acima JÁ inclui (servidor
+  # anterior a 26/10/2026 não manda tl_mods: nada a dizer)
+  jq -r "$_RDY_JQ"'((.tl_mods // {}) | tlmods) as $t | if $t != "" then "  ⚙ TLMOD no conf (o juiz soma/multiplica por cima do calibrado; o TL acima já inclui): " + $t else empty end' <<<"$tt" 2>/dev/null
   echo "  Calibração por máquina:"
   # hosts[].tl = a metade MOJ da tabela do juiz; hosts[].tl_kattis = a Kattis. Mostra a do método do conf.
   jq -r "$_RDY_JQ"'def tll: to_entries | map(select(.key != "default")) | map("\(.key)=\(.value)") | join(" ");
@@ -689,6 +696,7 @@ cmd_calib(){ need_login; id_arg '' "$@"
             + ((.time_limits // {} | tls) as $t | if $t == "" then "" else "\n  TL (máx entre juízes): \($t)" end)
             + ((((.time_limits_by_method // {})[$o] // {}).effective // {} | tls) as $t | if $t == "" then "" else " · pelo \($o | mname): \($t)" end) end) +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
+         (((.tl_mods // {}) | tlmods) as $t | if $t != "" then "\n  ⚙ TLMOD no conf (já incluído no TL): " + $t else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
   # soluções × o que a categoria pede, somado entre os juízes da versão atual (o número do Painel)
   # summary_alt = o mesmo pelo OUTRO método de TL: o que o autor veria se trocasse o TLMETHOD
