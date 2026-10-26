@@ -65,6 +65,17 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   mesmo, com aviso no trace). `moj-judges`: `ls`/`show` mostram `slots.cpus/by_node/smt` e `hold`;
   `config --parallel-max`; `parallel off|auto [--cushion] [--share]` (chave `"*"` do judges-config).
   Teste: `test/parallel-conf.sh`. Mudou CLI ⇒ os 4 tutoriais web (regra da casa).
+- **Métodos de TL (26/10/2026; `cdmoj/docs/PACOTE.md` "Métodos de TL")**: `moj edit → 8 → 11` grava `TLMETHOD`
+  (moj|kattis; `moj` tira a linha) na 1ª LINHA do conf com `conf_set_top` — o resto fica byte a byte (a linha sai do
+  tl-checksum: trocar não recalibra; o servidor ainda grava o conf com um `\n` final, então um conf de upload com
+  outro final muda o carimbo no 1º push); `→ 12` grava os `KATTIS_*` (validados; vazio remove; mudar recalibra).
+  O pré-voo (`gate` → `tlmethod_conf_gate`) usa a regra do `validate-problem.sh` (`conf_tlmethod_sane`).
+  `moj calib`/`moj check` mostram os dois métodos (`tl_method`, `kattis`, `time_limits_by_method`,
+  `hosts[].tl_kattis`, `expect_alt`, `summary_alt`; servidor antigo, sem os campos = a saída de antes) e o `_RDY_JQ`
+  traduz `tl_no_margin`/`tle_no_margin`/`tle_unmeasured`/`other_method` e o estado `unmeasured`. Número que vem do
+  JSON passa por `n0` antes de ir p/ o texto: o jq 1.7+ imprime o literal `2.0` como veio, o 1.6 imprime `2`.
+  `moj test --run` grava as duas metades na tabela local. `conf_get`/`conf_set` leem a ÚLTIMA linha sem `\n`
+  final (o `conf_set` a APAGAVA ao regravar). Teste: `test/tl-method-conf.sh`.
 - **Problema sem exemplo (`SAMPLE=no` no `conf`, 2026-09-23)**: o pré-voo (`gate`) exige `sample*` OU
   `SAMPLE=no` (`sample_off`, a mesma regra do mojtools `stmt_no_samples` e do editor web `sampleOff`);
   `moj preview` manda `examples:[]` com a flag (o servido não tem exemplos); `moj edit` → 8 → 6 liga e

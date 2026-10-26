@@ -63,7 +63,8 @@
 #                                         --all-stale recalibra o lote do painel.
 #   moj calib [<id>]                      Mostra a calibração por extenso: cada solução com o que a
 #                                         categoria pede e o que obteve; o validador de entrada
-#                                         (--json = JSON cru).
+#                                         (--json = JSON cru). Mostra os dois métodos de TL (MOJ e
+#                                         Kattis): o do conf vale; o outro aparece ao lado.
 #   moj calib-report [<id>] [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
 #   moj testrun [<id|dir>] <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
 #   moj testrun-status <run>              Consulta um testrun.
@@ -367,10 +368,24 @@ json_to_pkg(){ local jf="$1" d="$2" id="$3" _t
 # SEMPRE retorna 0: sem o `return 0` final, o rc do último [[ ]] do laço vazava (chave ausente
 # = rc 1) e QUALQUER atribuição `x="$(conf_get …)"` sob set -e matava o moj MUDO (foi o
 # 'moj test --run' que parava sem nada depois do pré-voo em máquina com bwrap real).
-conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; return 0; }
+# A ÚLTIMA linha sem \n final (o conf que o editor web grava) também conta: sem o `|| [[ -n "$line" ]]`,
+# o `read` devolve 1 nela, o conf_get não a achava e o conf_set a APAGAVA ao regravar o arquivo.
+conf_get(){ local d="$1" k="$2" line; [[ -f "$d/conf" ]] || return 0; while IFS= read -r line || [[ -n "$line" ]]; do [[ "$line" == "$k="* ]] && { line="${line#"$k"=}"; line="${line%\"}"; printf '%s' "${line#\"}"; return 0; }; done < "$d/conf"; return 0; }
 conf_set(){ local d="$1" k="$2" v="$3" line found=0 tmp; tmp="$(mktemp)"
-  [[ -f "$d/conf" ]] && while IFS= read -r line; do if [[ "$line" == "$k="* ]]; then [[ -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; found=1; else printf '%s\n' "$line" >> "$tmp"; fi; done < "$d/conf"
+  [[ -f "$d/conf" ]] && while IFS= read -r line || [[ -n "$line" ]]; do if [[ "$line" == "$k="* ]]; then [[ -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; found=1; else printf '%s\n' "$line" >> "$tmp"; fi; done < "$d/conf"
   [[ $found -eq 0 && -n "$v" ]] && printf '%s=%s\n' "$k" "$v" >> "$tmp"; mv -f "$tmp" "$d/conf"; }
+# conf_set_top <dir> <chave> <valor> — tira as linhas da chave e, com valor, grava `chave=valor` na 1ª linha. O
+# resto do conf fica igual BYTE A BYTE (inclusive sem o \n final). É o caso do TLMETHOD: a linha dele sai do
+# tl-checksum, então trocar o método não pede recalibração — desde que nenhum outro byte do conf mude. (O servidor
+# grava o conf com um \n final — lib/problems.sh nl1 —: conf de upload com outro final muda o carimbo no 1º push.)
+conf_set_top(){ local d="$1" k="$2" v="$3" all="" out="" line nl
+  [[ -f "$d/conf" ]] && { IFS= read -r -d '' all < "$d/conf" || true; }
+  while [[ -n "$all" ]]; do
+    if [[ "$all" == *$'\n'* ]]; then line="${all%%$'\n'*}"; all="${all#*$'\n'}"; nl=$'\n'; else line="$all"; all=""; nl=""; fi
+    [[ "$line" =~ ^[[:space:]]*"$k"[[:space:]]*= ]] || out+="$line$nl"
+  done
+  [[ -n "$v" ]] && out="$k=$v"$'\n'"$out"
+  printf '%s' "$out" > "$d/conf"; }
 
 # ---- comandos simples ---------------------------------------------------------------------
 cmd_login(){ local u p; read -rp "login MOJ: " u; read -rsp "senha: " p; echo
@@ -406,11 +421,26 @@ def plabel: sub(":.*$"; "") as $k | rdy_arg as $a
 def ctext: (.counts // {}) as $c | ["AC","WA","TLE","MLE","RE","UE"] | map(select($c[.] != null) | "\(.) \($c[.])") | join(" · ");
 def xpill: (.state // "") as $s
   | if $s == "ok" then "✓ conforme" elif $s == "note" then "≈ conforme, outro motivo"
-    elif $s == "bad" then "✗ DIVERGENTE" elif $s == "norun" then "✗ NÃO RODOU" else "•" end;
+    elif $s == "bad" then "✗ DIVERGENTE" elif $s == "norun" then "✗ NÃO RODOU"
+    elif $s == "unmeasured" then "• não medido" else "•" end;
+# nome do MÉTODO de TL (cdmoj/docs/PACOTE.md "Métodos de TL") e o outro método
+def mname: if . == "kattis" then "Kattis" else "MOJ" end;
+def mother: if . == "kattis" then "moj" else "kattis" end;
+def r2: if type == "number" then (. * 100 | round / 100) else . end;
+# os parâmetros do Kattis ({a,b,r} do servidor). `. + 0` normaliza o número: o jq 1.7+ imprime o literal 2.0 como
+# veio, o 1.6 (Ubuntu 22.04, muitos Macs) imprime 2 — sem isto a linha mudava com o jq do usuário
+def n0: if type == "number" then . + 0 else . end;
+def kpar: (. // {}) as $k | "(a=\($k.a // 2 | n0) b=\($k.b // 1.5 | n0) r=\($k.r // 1 | n0))";
 def xwant: if . == "good" then "esperado: aceita em todos os testes, dentro do TL que o juiz cobra"
   elif . == "pass" then "esperado: aceita em todos os testes, dentro do TL"
   elif . == "slow" then "esperado: TLE em pelo menos 1 teste, sem errar os outros"
   elif . == "wrong" then "esperado: ser reprovada, de preferência por WA" else "" end;
+# com o juízo do método Kattis, a regra leva as MARGENS da spec (a × tempo da good ≤ TL; a lenta passa de b × TL)
+def xwant($ex): if (($ex // {}).method // "") == "kattis" and ($ex.need != null) and (. == "good" or . == "slow") then
+    ($ex.need | r2) as $k
+    | if . == "good" then "esperado (Kattis): aceita em todos os testes, com folga — \($k) × o pior tempo cabe no TL"
+      else "esperado (Kattis): estourar o tempo em pelo menos 1 teste por \($k) × o TL, sem errar os outros" end
+  else xwant end;
 def xgot: (.why // "") as $w | (.counts // {} | del(.AC) | {counts: .} | ctext) as $n
   | if $w == "all_ac" then "aceita em todos os testes"
     elif $w == "over_tl" then "aceita, mas levou \(.tmax)s — acima do TL de \(.tl)s\(if (.drift // 0) > 0 then " + \(.drift)s de tolerância" else "" end) que o juiz cobra (TLOVERRIDE baixo?)"
@@ -426,6 +456,10 @@ def xgot: (.why // "") as $w | (.counts // {} | del(.AC) | {counts: .} | ctext) 
     elif $w == "ce" then "não compilou — não prova nada sobre os testes"
     elif $w == "lang" then "linguagem indisponível neste juiz"
     elif $w == "ue" then "erro do corretor/juiz (UE)"
+    elif $w == "tl_no_margin" then "aceita, mas sem a folga do Kattis: \(.need // 2 | r2) × \(.tmax)s passa do TL de \(.tl)s (TLOVERRIDE baixo demais?)"
+    elif $w == "tle_no_margin" then "estourou o tempo, mas só \(if .ratio != null then "\(.ratio | r2) × " else "um pouco acima d" end)o TL — o Kattis pede \(.need // 1.5 | r2) × (a spec recusaria o pacote: a solução lenta tem de ser lenta de verdade)"
+    elif $w == "tle_unmeasured" then "estourou o tempo, mas o teste parou no teto de \(.etl)s antes de \(.need // 1.5 | r2) × o TL — a margem do Kattis não pôde ser medida"
+    elif $w == "other_method" then "esta calibração não julgou a solução por este método de TL — recalibre (moj calibrate)"
     elif $w == "noverdict" then "sem veredicto" else "" end;
 def vtext: (.state // "") as $s
   | if $s == "none" then "sem validador (scripts/validator.cpp)"
@@ -617,10 +651,21 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
   jq -r '(.checks//[])[] | "    \(if .ok then "✓" else "✗" end) \(.name)\(if (.detail//"")!="" then " — \(.detail)" else "" end)"' <<<"$vt" 2>/dev/null || echo "    (sem relatório)"
   echo "  Time limits (máx entre juízes):"
   jq -r '(.time_limits//{})|to_entries|map(select(.key!="default"))| if length==0 then "    (sem TL)" else (map("    \(.key): \(.value)s")|join("\n")) end' <<<"$tt" 2>/dev/null
+  # MÉTODO DO TL (TLMETHOD do conf; cdmoj/docs/PACOTE.md "Métodos de TL"): os juízes medem os dois métodos e o
+  # conf escolhe qual vale — o TL acima já é o do método do conf; o do outro sai ao lado p/ comparar
+  jq -r "$_RDY_JQ"'select(has("tl_method")) | (.tl_method // "moj") as $m | ($m | mother) as $o
+    | "  método do TL: \($m | mname)" + (if $m == "kattis" then " " + (.kattis | kpar) else "" end)
+      + ((((.time_limits_by_method // {})[$o] // {}).effective // {}) | to_entries | map(select(.key != "default"))
+         | if length == 0 then "" else " · pelo \($o | mname): " + (map("\(.key)=\(.value)s") | join(" ")) end)' <<<"$tt" 2>/dev/null || true
   # TLOVERRIDE do conf: o autor mandou no TL — o exibido acima JÁ é o efetivo
   jq -r 'if (.tl_override // {}) != {} then "  ⚙ TL OVERRIDE no conf (vence o calibrado): " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else empty end' <<<"$tt" 2>/dev/null
   echo "  Calibração por máquina:"
-  jq -r '(.hosts//[])[] | "    \(.host): " + ((.tl//{})|to_entries|map(select(.key!="default"))|map("\(.key)=\(.value)")|join(" ")) + (if ((.missing//[])|length)>0 then "   (falta: \(.missing|join(","))" + ")" else "" end)' <<<"$ct" 2>/dev/null || echo "    (não calibrado)"
+  # hosts[].tl = a metade MOJ da tabela do juiz; hosts[].tl_kattis = a Kattis. Mostra a do método do conf.
+  jq -r "$_RDY_JQ"'def tll: to_entries | map(select(.key != "default")) | map("\(.key)=\(.value)") | join(" ");
+    (.tl_method // "moj") as $m | ($m | mother) as $o
+    | (.hosts//[])[] | "    \(.host): " + ((if $m == "kattis" then .tl_kattis else .tl end) // {} | tll | if . == "" then "(sem TL)" else . end)
+      + (if ((.missing//[])|length)>0 then "   (falta: \(.missing|join(","))" + ")" else "" end)
+      + (((if $o == "kattis" then .tl_kattis else .tl end) // {} | tll) as $a | if $a == "" then "" else "   · \($o | mname): \($a)" end)' <<<"$ct" 2>/dev/null || echo "    (não calibrado)"
 }
 # CALIBRAÇÃO ESTRUTURADA: o que cada juiz rodou, solução a solução, teste a teste — o campo
 # `sols` do /problems/calib ([{file,lang,category,verdict,tests:[{name,code,time,tl}]}]).
@@ -628,32 +673,55 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
 cmd_calib(){ need_login; id_arg '' "$@"
   local id="$ID" j; j="$(api GET "/problems/calib?id=$(enc "$id")")"
   [[ "$RAW" == 1 ]] && { printf '%s\n' "$j"; return; }
-  jq -r --argjson now "$EPOCHSECONDS" '"\(.id)  (checksum \((.checksum // "?")[0:8])" +
+  jq -r --argjson now "$EPOCHSECONDS" "$_RDY_JQ"'def tls: to_entries | map(select(.key != "default")) | map("\(.key)=\(.value)s") | join(" ");
+         "\(.id)  (checksum \((.checksum // "?")[0:8])" +
            (if (.version // "") != "" then ", versão \(.version[0:8])" else "" end) + ")" +
          # EM VOO agora: a calibração leva minutos, e sem esta linha o autor não sabe se esperar
          (if ((.calibrating // []) | length) > 0 then "\n  ⏳ calibrando: " +
             ((.calibrating | map((if .host == "" then "na fila" else .host end)
               + (if (.since // 0) > 0 then " (há \((($now - .since) / 60) | floor) min)" else "" end))) | join(" · "))
           else "" end) +
+         # MÉTODO DO TL: o do conf vale; os juízes medem os dois (trocar o TLMETHOD não recalibra). Servidor
+         # anterior aos dois métodos não manda tl_method: nada a dizer.
+         (if has("tl_method") | not then "" else (.tl_method // "moj") as $m | ($m | mother) as $o
+          | "\n  método do TL: \($m | mname)" + (if $m == "kattis" then " " + (.kattis | kpar) else "" end)
+            + " — o do conf; a calibração mede os dois métodos"
+            + ((.time_limits // {} | tls) as $t | if $t == "" then "" else "\n  TL (máx entre juízes): \($t)" end)
+            + ((((.time_limits_by_method // {})[$o] // {}).effective // {} | tls) as $t | if $t == "" then "" else " · pelo \($o | mname): \($t)" end) end) +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
   # soluções × o que a categoria pede, somado entre os juízes da versão atual (o número do Painel)
-  jq -r '(.summary // null) as $s | if $s == null or (($s.total // 0) == 0 and (($s.missing // []) | length) == 0) then empty
-    else "  soluções: \(($s.total // 0) - ($s.bad // 0)) de \($s.total // 0) conforme"
+  # summary_alt = o mesmo pelo OUTRO método de TL: o que o autor veria se trocasse o TLMETHOD
+  jq -r "$_RDY_JQ"'def sline: . as $s | if $s == null or (($s.total // 0) == 0 and (($s.missing // []) | length) == 0) then empty
+    else "\(($s.total // 0) - ($s.bad // 0)) de \($s.total // 0) conforme"
       + (if ($s.note // 0) > 0 then " · \($s.note) por outro motivo" else "" end)
       + (if ($s.bad // 0) > 0 then " · \($s.bad) DIVERGENTE(S): \($s.bad_files | join(", "))" else "" end)
-      + (if (($s.missing // []) | length) > 0 then " · sem resultado: \($s.missing | join(", ")) (moj calibrate)" else "" end) end' <<<"$j" 2>/dev/null || true
+      + (if (($s.missing // []) | length) > 0 then " · sem resultado: \($s.missing | join(", ")) (moj calibrate)" else "" end) end;
+    (.tl_method // "moj") as $m
+    | (.summary // null | sline | "  soluções: " + .),
+      (.summary_alt // null | sline | "  pelo \($m | mother | mname), se trocar o método: " + .)' <<<"$j" 2>/dev/null || true
   # juiz `stale` = calibrou OUTRA versão do pacote: o servidor NÃO manda as sols dele (mostrar a
   # lista velha fazia o autor ver solução já apagada como se fosse a de agora). Diga isso, em vez
   # de repetir "ainda não reportou" — que é outra coisa (juiz/mojtools antigos).
-  jq -r "$_RDY_JQ"'. as $r | (.hosts // [])[] |
-    "— \(.host)  \(.at // 0 | todate)  TL: " + ((.tl // {})|to_entries|map("\(.key)=\(.value)")|join(" ")) +
+  # hosts[].tl = a metade MOJ da tabela do juiz, hosts[].tl_kattis = a Kattis; cada solução traz `expect` (pelo
+  # método do conf) e `expect_alt` (pelo outro); um teste com `code_alt` traz o veredicto pelos dois métodos —
+  # `method` da linha diz de qual método é o `code`
+  jq -r "$_RDY_JQ"'def tll: to_entries | map("\(.key)=\(.value)") | join(" ");
+    . as $r | ($r.tl_method // "moj") as $m | ($m | mother) as $o | (.hosts // [])[] |
+    "— \(.host)  \(.at // 0 | todate)  TL \($m | mname): " + ((if $m == "kattis" then .tl_kattis else .tl end) // {} | tll | if . == "" then "(sem TL)" else . end) +
+      (((if $o == "kattis" then .tl_kattis else .tl end) // {} | tll) as $a | if $a == "" then "" else "  · \($o | mname): \($a)" end) +
       (if .stale then "   ⚠ DESATUALIZADO (versão \((.version // "?")[0:8])) — recalibre" else "" end),
     (if .stale then "  (as soluções deste juiz são de uma versão anterior do pacote — rode: moj calibrate \($r.id // ""))"
      elif ((.sols // [])|length) > 0 then
-      (.sols[] | "  [\(.expect | xpill)] \(.category)/\(.file) [\(.lang)]: \(.verdict)",
-        (if (.category | xwant) != "" then "      \(.category | xwant); obtido: \(.expect | xgot)" else empty end),
-        ((.tests // [])[] | "    \(.name): \(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"))
+      (.sols[] | (.method // "moj") as $rm | (.expect // {}) as $e |
+        "  [\(.expect | xpill)] \(.category)/\(.file) [\(.lang)]: \(.verdict)"
+          + (if .expect_alt != null then "   · \($o | mname): \(.expect_alt | xpill)" else "" end),
+        (if (.category | xwant($e)) != "" then "      \(.category | xwant($e)); obtido: \(.expect | xgot)" else empty end),
+        (if .expect_alt != null and ((.expect_alt.state // "") | IN("ok", "skip") | not) and ((.expect_alt.why // "") != ($e.why // ""))
+         then "      pelo \($o | mname): \(.expect_alt | xgot)" else empty end),
+        ((.tests // [])[] | "    \(.name): " + (if has("code_alt") then "\($rm | mname) " else "" end)
+           + "\(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"
+           + (if has("code_alt") then "   · \($rm | mother | mname) \(.code_alt) (tl \(.tl_alt // "?")s)" else "" end)))
      else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end),
     (if (.stale | not) and .validator != null then
        "  entradas: \(.validator | vtext)",
@@ -856,6 +924,20 @@ gate(){ local d="$1" ok=1
   if [[ -f "$d/tests/score" ]]; then score_gate "$d" || ok=0; fi
   parallel_conf_gate "$d" || ok=0
   function_conf_gate "$d" || ok=0
+  tlmethod_conf_gate "$d" || ok=0
+  [[ $ok -eq 1 ]]; }
+# _num_in <v> <min> <max> [x] — v é número decimal com ponto em [min, max] (com x: min exclusivo). awk com
+# LC_ALL=C: no pt_BR o mawk lê "0.5" como 0.
+_num_in(){ [[ "$1" =~ ^([0-9]+\.?[0-9]*|\.[0-9]+)$ ]] || return 1
+  LC_ALL=C awk -v v="$1" -v lo="$2" -v hi="$3" -v x="${4:-}" 'BEGIN{ v += 0; exit !((x == "x" ? v > lo : v >= lo) && v <= hi) }'; }
+# tlmethod_conf_gate <dir> — o MÉTODO do TL (TLMETHOD=moj|kattis) e os parâmetros do Kattis (cdmoj/docs/PACOTE.md
+# "Métodos de TL"): a MESMA regra do validate-problem.sh (conf_tlmethod_sane), que REPROVA o pacote no servidor.
+_tlm_cv(){ local v; v="$(conf_get "$1" "$2")"; v="${v%%#*}"; v="${v//[[:space:]\"\']/}"; printf '%s' "$v"; }
+tlmethod_conf_gate(){ local d="$1" ok=1 v
+  v="$(_tlm_cv "$d" TLMETHOD)"; [[ -z "$v" || "$v" == moj || "$v" == kattis ]] || { echo "  ⚠ TLMETHOD=$v inválido (moj ou kattis)" >&2; ok=0; }
+  v="$(_tlm_cv "$d" KATTIS_AC_TO_TIME_LIMIT)"; [[ -z "$v" ]] || _num_in "$v" 1 100 || { echo "  ⚠ KATTIS_AC_TO_TIME_LIMIT=$v inválido (número de 1 a 100)" >&2; ok=0; }
+  v="$(_tlm_cv "$d" KATTIS_TIME_LIMIT_TO_TLE)"; [[ -z "$v" ]] || _num_in "$v" 1 100 || { echo "  ⚠ KATTIS_TIME_LIMIT_TO_TLE=$v inválido (número de 1 a 100)" >&2; ok=0; }
+  v="$(_tlm_cv "$d" KATTIS_TIME_RESOLUTION)"; [[ -z "$v" ]] || _num_in "$v" 0 10 x || { echo "  ⚠ KATTIS_TIME_RESOLUTION=$v inválido (número maior que 0 e até 10)" >&2; ok=0; }
   [[ $ok -eq 1 ]]; }
 # function_conf_gate <dir> — FUNCTION_LANGS (submissão de função, cdmoj/docs/PACOTE.md): cada linguagem
 # listada precisa do driver scripts/<lang>/compile.sh (é ele que traz o main). A MESMA regra do
@@ -902,7 +984,8 @@ cmd_test(){ local d="." run=0 sol="" a
   local tltmp=0 ctl=""
   if [[ ! -f "$d/tl" ]]; then
     ctl="$(conf_get "$d" CALIBRATIONTL)"; [[ "$ctl" =~ ^[0-9.]+$ ]] || ctl=5
-    printf 'TL[default]=%s\n' "$ctl" > "$d/tl"; tltmp=1
+    # as DUAS metades (MOJ e Kattis): com TLMETHOD=kattis no conf, o build-and-test lê a TLKATTIS
+    printf 'TL[default]=%s\ndeclare -A TLKATTIS\nTLKATTIS[default]=%s\n' "$ctl" "$ctl" > "$d/tl"; tltmp=1
   fi
   local sols=() s lang v rc=0
   if [[ -n "$sol" ]]; then sols=("$sol"); else shopt -s nullglob; sols=("$d"/sols/good/*); shopt -u nullglob; fi
@@ -920,7 +1003,7 @@ cmd_test(){ local d="." run=0 sol="" a
   # contrato do build-and-test.sh (o mesmo que o calibreitor usa): stdout = workdir na 1ª linha
   # + FINALRESP na última; o stderr real vai p/ <workdir>/run-trace.log (exec 2>), com uma linha
   # "EXECTIME <teste> <tempo> <veredicto>" por teste — é daí que saem os tempos abaixo.
-  local outf errf wdir times tlused sabs dabs
+  local outf errf wdir times tlused tlm tlx sabs dabs
   outf="$(mktemp)"; errf="$(mktemp)"
   dabs="$(_abspath "$d")"
   for s in "${sols[@]}"; do
@@ -937,8 +1020,11 @@ cmd_test(){ local d="." run=0 sol="" a
       # sob pt_BR, "0.21"+0 vira 0 (strtod espera vírgula) e %.2f imprime vírgula ("pior 0,00s")
       times="$(LC_ALL=C awk '$1=="EXECTIME"{n++; printf " %s%s",$3,($4=="AC"?"":"("$4")"); if($3+0>w)w=$3+0}
                     END{if(n)printf "\n    %d teste(s), pior %.2fs",n,w}' "$wdir/run-trace.log")"
-      tlused="$(grep -m1 '^TL_LANG=' "$wdir/report.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"")"
-      [[ -n "$times" ]] && printf '    tempos%s:%s\n' "${tlused:+ (TL ${tlused}s)}" "$times"
+      tlused="$(grep -m1 '^TL_LANG=' "$wdir/report.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"")" || tlused=""
+      # o método do TL que o build-and-test usou (mojtools antigo não grava TL_METHOD: fica vazio)
+      tlm="$(grep -m1 '^TL_METHOD=' "$wdir/report.env" 2>/dev/null | cut -d= -f2- | tr -d "'\"")" || tlm=""
+      tlx=""; if [[ "$tlm" == kattis ]]; then tlx=", método Kattis"; fi
+      [[ -n "$times" ]] && printf '    tempos%s:%s\n' "${tlused:+ (TL ${tlused}s${tlx})}" "$times"
       [[ -s "$wdir/report.html" ]] && printf '    relatório: %s\n' "$wdir/report.html"
     fi
     if [[ -z "$v" ]]; then   # julgamento mudo = ambiente quebrado, não engolir o porquê
@@ -1699,6 +1785,10 @@ edit_conf(){ local d="$1"
       "$(conf_get "$d" CPUNEEDED)" "$(conf_get "$d" SAMENUMA)" "$(conf_get "$d" MAXPARALLELTESTS)"
     # submissão de FUNÇÃO: as linguagens em que o editor do aluno abre vazio (o driver traz o main)
     printf '  10) linguagens de submissão de função (FUNCTION_LANGS): %s\n' "$(conf_get "$d" FUNCTION_LANGS)"
+    # MÉTODO do TL (cdmoj/docs/PACOTE.md "Métodos de TL"): a calibração mede os dois; o conf escolhe qual vale
+    local tm ka kb kr; tm="$(_tlm_cv "$d" TLMETHOD)"; ka="$(_tlm_cv "$d" KATTIS_AC_TO_TIME_LIMIT)"
+    kb="$(_tlm_cv "$d" KATTIS_TIME_LIMIT_TO_TLE)"; kr="$(_tlm_cv "$d" KATTIS_TIME_RESOLUTION)"
+    printf '  11) método do TL (TLMETHOD): %s   12) parâmetros do Kattis: a=%s b=%s r=%s\n' "${tm:-moj}" "${ka:-2.0}" "${kb:-1.5}" "${kr:-1.0}"
     case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
       1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
       2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
@@ -1726,6 +1816,31 @@ edit_conf(){ local d="$1"
            echo "  FUNCTION_LANGS=$fl: nessas linguagens o editor do aluno abre vazio (não pede recalibração)."
            function_conf_gate "$d" || true
          else echo "  valor inválido (ids separados por vírgula, ex.: c,cpp,py)"; fi;;
+      11) local m; m="$(ask '  método do TL — moj (calibrafactor × pior tempo) ou kattis (múltiplo de r acima de a × pior tempo): ' "${tm:-moj}")"
+         m="$(printf '%s' "$m" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+         # a linha TLMETHOD vai na 1ª linha do conf e o resto fica intacto: ela sai do tl-checksum, e trocar
+         # o método NÃO recalibra (os juízes já mediram os dois)
+         case "$m" in
+           ""|moj) conf_set_top "$d" TLMETHOD ""
+              echo "  método MOJ: TL = calibrafactor × o pior tempo das good + 0,02 s."
+              echo "  A troca vale na hora e não recalibra. Compare os dois TLs com: moj calib";;
+           kattis) conf_set_top "$d" TLMETHOD kattis
+              echo "  TLMETHOD=kattis: TL = o menor múltiplo de r acima de a × o pior tempo das good."
+              echo "  A troca vale na hora e não recalibra. Compare os dois TLs com: moj calib";;
+           *) echo "  valor inválido (moj ou kattis)";;
+         esac;;
+      12) local a b r
+         a="$(ask '  KATTIS_AC_TO_TIME_LIMIT (a: o TL é pelo menos a × o pior tempo das good; 1 a 100; vazio = 2.0): ' "$ka")"
+         b="$(ask '  KATTIS_TIME_LIMIT_TO_TLE (b: a solução slow passa de b × o TL; 1 a 100; vazio = 1.5): ' "$kb")"
+         r="$(ask '  KATTIS_TIME_RESOLUTION (r: o TL é múltiplo de r segundos; maior que 0 e até 10; vazio = 1.0): ' "$kr")"
+         a="${a//[[:space:]]/}"; b="${b//[[:space:]]/}"; r="${r//[[:space:]]/}"
+         if { [[ -z "$a" ]] || _num_in "$a" 1 100; } && { [[ -z "$b" ]] || _num_in "$b" 1 100; } && { [[ -z "$r" ]] || _num_in "$r" 0 10 x; }; then
+           # só regrava o que mudou: o conf_set normaliza o arquivo, e o conf faz parte do tl-checksum
+           if [[ "$a" != "$ka" ]]; then conf_set "$d" KATTIS_AC_TO_TIME_LIMIT "$a"; fi
+           if [[ "$b" != "$kb" ]]; then conf_set "$d" KATTIS_TIME_LIMIT_TO_TLE "$b"; fi
+           if [[ "$r" != "$kr" ]]; then conf_set "$d" KATTIS_TIME_RESOLUTION "$r"; fi
+           echo "  parâmetros do Kattis gravados (vazio = o padrão). Mudar um parâmetro pede recalibração."
+         else echo "  valor inválido: a e b de 1 a 100; r maior que 0 e até 10"; fi;;
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }
