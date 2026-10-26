@@ -718,6 +718,7 @@ cmd_calib(){ need_login; id_arg '' "$@"
     (.tl_sim_state // "") as $st
     | if $st == "" then empty
       elif $st == "calibrating" then "  simulação do TL: depois que a calibração terminar"
+      elif $st == "error" then "  simulação do TL: não deu para calcular com os dados desta calibração"
       elif $st != "ok" or .tl_sim == null then "  simulação do TL: calibre o problema primeiro"
       else .tl_sim as $s | (.tl_suggest // {}) as $g
         | "  simulação do TL (tempos desta calibração, juízes \($s.hosts | join(", ")); nada roda de novo):",

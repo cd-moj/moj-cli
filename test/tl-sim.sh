@@ -36,6 +36,9 @@ ck "conflito: nomeia a pass e a lenta"          '[[ "$out" == *"sugestão MOJ: n
 jq -c '.tl_sim = null | .tl_suggest = null | .tl_sim_state = "calibrating"' "$T/calib.json" > "$T/c" && mv "$T/c" "$T/calib.json"
 out="$(cmd_calib 'col#pa' 2>&1)"
 ck "calibração em voo: espera"                  '[[ "$out" == *"simulação do TL: depois que a calibração terminar"* ]]'
+jq -c '.tl_sim_state = "error"' "$T/calib.json" > "$T/c" && mv "$T/c" "$T/calib.json"
+out="$(cmd_calib 'col#pa' 2>&1)"
+ck "erro na simulação (servidor): diz que não deu"  '[[ "$out" == *"simulação do TL: não deu para calcular"* ]]'
 jq -c 'del(.tl_sim, .tl_suggest, .tl_sim_state)' "$T/calib.json" > "$T/c" && mv "$T/c" "$T/calib.json"
 out="$(cmd_calib 'col#pa' 2>&1)"
 ck "servidor anterior (sem o campo): nenhuma linha" '[[ "$out" != *"simulação do TL"* && "$out" != *"sugestão"* ]]'
