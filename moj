@@ -64,7 +64,8 @@
 #   moj calib [<id>]                      Mostra a calibração por extenso: cada solução com o que a
 #                                         categoria pede e o que obteve; o validador de entrada
 #                                         (--json = JSON cru). Mostra os dois métodos de TL (MOJ e
-#                                         Kattis): o do conf vale; o outro aparece ao lado.
+#                                         Kattis): o do conf vale; o outro aparece ao lado. Mostra
+#                                         a simulação do TL e a sugestão de cada método.
 #   moj calib-report [<id>] [--host <j> --sol <s>] [-o f.html]   Baixa o report.html de uma solução.
 #   moj testrun [<id|dir>] <sol> [--report f.html]   Roda uma solução no juiz, fora do history.
 #   moj testrun-status <run>              Consulta um testrun.
@@ -708,6 +709,31 @@ cmd_calib(){ need_login; id_arg '' "$@"
     (.tl_method // "moj") as $m
     | (.summary // null | sline | "  soluções: " + .),
       (.summary_alt // null | sline | "  pelo \($m | mother | mname), se trocar o método: " + .)' <<<"$j" 2>/dev/null || true
+  # SIMULAÇÃO DO TL (o servidor calcula: cdmoj lib/tl-sim.sh): como o TL sairia em outras configurações, com os tempos
+  # desta calibração, que soluções sairiam com o veredicto errado e a sugestão de cada método. Servidor anterior
+  # (sem tl_sim_state): nada.
+  jq -r "$_RDY_JQ"'def tll: to_entries | map(select(.key != "default")) | map("\(.key)=\(.value | n0)s") | join(" ") | if . == "" then "—" else . end;
+    def res: if .ok then "✓" + (if ((.unmeasured // []) | length) > 0 then "  (não medido: \(.unmeasured | join(", ")))" else "" end)
+             else "✗ " + ((.fail // []) | join(", ")) end;
+    (.tl_sim_state // "") as $st
+    | if $st == "" then empty
+      elif $st == "calibrating" then "  simulação do TL: depois que a calibração terminar"
+      elif $st != "ok" or .tl_sim == null then "  simulação do TL: calibre o problema primeiro"
+      else .tl_sim as $s | (.tl_suggest // {}) as $g
+        | "  simulação do TL (tempos desta calibração, juízes \($s.hosts | join(", ")); nada roda de novo):",
+          ($s.moj.rows[] | "    MOJ fator \(.cf | n0)\(if .current then " (atual)" else "" end): \(.tl | tll)   \(res)"),
+          ($s.kattis.rows[] | "    Kattis r=\(.r | n0) s\(if .current then " (atual)" else "" end): \(.tl | tll)   \(res)"),
+          ("  sugestão MOJ: " + ($g.moj // {} | if .state == "keep" then "manter o fator \(.cf | n0)"
+              elif .state == "change" then "fator \(.cf | n0)" + (if .why == "default_valid" then " (o padrão)" else "" end) + " — moj edit → 8 → 1"
+              elif .state == "conflict" then "nenhum fator serve: \(.pass) precisa de mais tempo do que \(.slow) gasta"
+              elif .why == "override" then "o TLOVERRIDE[default] do conf decide" else "sem pass/slow para conferir" end)),
+          ("  sugestão Kattis: " + ($g.kattis // {} | if .state == "keep" then "manter a resolução \(.r | n0) s"
+              elif .state == "change" then "a=\(.a | n0) b=\(.b | n0) r=\(.r | n0) s"
+                + (if .why == "largest_r" then " (a maior resolução que serve)" elif .why == "adjust_a" then " (ajuste do multiplicador)"
+                   elif .why == "adjust_b" then " (ajuste da margem da lenta)" else "" end) + " — moj edit → 8 → 11 e 12"
+              elif .state == "conflict" then "nenhuma combinação serve: \(.pass) precisa de mais tempo do que \(.slow) gasta, com a margem"
+              elif .why == "override" then "o TLOVERRIDE[default] do conf decide" else "—" end))
+      end' <<<"$j" 2>/dev/null || true
   # juiz `stale` = calibrou OUTRA versão do pacote: o servidor NÃO manda as sols dele (mostrar a
   # lista velha fazia o autor ver solução já apagada como se fosse a de agora). Diga isso, em vez
   # de repetir "ainda não reportou" — que é outra coisa (juiz/mojtools antigos).
