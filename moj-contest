@@ -96,6 +96,9 @@
 #                       | assign <login> <coorte> | materialize | release [on|off]
 #       Coortes de placar: times oficiais e convidados. Uma coorte privada não aparece no placar
 #       público. --unranked entra intercalado sem consumir posição. release libera os resultados.
+#   moj-contest -c <cid> inscricoes link [--novo|--revogar]
+#       Contest super secreto: mostra o link privado de inscrição. Mande este link ao grupo privado.
+#       --novo gera outro link, e o anterior para de funcionar. --revogar apaga o link.
 #   moj-contest -c <cid> ua-gate show | check <login>
 #                       | set [--mode enforce|observe|off] [--from-login REGEX --expect '\1']
 #                         [--region 'Sede=substring']… [--regex 'REGEX=substring']…
@@ -1055,6 +1058,26 @@ cmd_cohorts(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     *) die "cohorts: sub desconhecido '$sub' (ls|add|set|rm|assign|materialize|release)";;
   esac; }
 
+# ---- link privado de inscrição ---------------------------------------------------------------
+# LINK PRIVADO de inscrição (contest SUPER SECRETO, 27/10/2026): sem a chave do link a inscrição responde o 404 de
+# contest inexistente. --novo troca a chave (o link velho morre na hora); --revogar apaga. Rota: /contest/admin/registrations.
+cmd_inscricoes(){ need_contest; need_login; local sub="${1:-link}"; shift || true
+  case "$sub" in
+    link)
+      local act="" r
+      case "${1:-}" in
+        --novo|--new|--rotate) act=link-rotate;; --revogar|--revoke) act=link-revoke;; "") ;;
+        *) die "uso: inscricoes link [--novo|--revogar]";;
+      esac
+      if [[ -n "$act" ]]; then r="$(api POST "/contest/admin/registrations$(qc)" "{\"action\":\"$act\"}")"
+      else r="$(api GET "/contest/admin/registrations$(qc)")"; fi
+      if [[ "$RAW" == 1 ]]; then printf '%s\n' "$r"; return 0; fi
+      jq -r --arg pub "${MOJ_BASE_URL%/}/contests/inscricao/?c=$CONTEST" '.private_link // {} |
+        if (.secret | not) then "contest comum: a inscrição é pelo link público \($pub)"
+        elif .active then (.url // "link ativo (só o admin do contest recebe o link)")
+        else "sem link privado: ninguém de fora consegue se inscrever (gere com: moj-contest inscricoes link --novo)" end' <<<"$r";;
+    *) die "inscricoes: sub desconhecido '$sub' (link)";;
+  esac; }
 # ---- gate de navegador por sede ------------------------------------------------------------
 cmd_ua_gate(){ need_contest; need_login; local sub="${1:-show}"; shift || true
   case "$sub" in
@@ -1185,6 +1208,7 @@ case "$cmd" in
   rounds|rodadas|round) cmd_rounds "$@";;
   cohorts|coortes) cmd_cohorts "$@";;
   ua-gate|uagate) cmd_ua_gate "$@";;
+  inscricoes|inscricao|registrations) cmd_inscricoes "$@";;
   machines|maquinas) cmd_machines "$@";;
   seed|semear) cmd_seed "$@";;
   help|-h|--help) awk 'NR>1{ if (!/^#/ || /@INLINE/) exit; sub(/^# ?/,""); print }' "$0";;
