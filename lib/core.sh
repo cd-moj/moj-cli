@@ -206,6 +206,10 @@ $_bl"
   o time entra pelo endereço do contest: $(jq -r '.error.url // empty' <<<"$out" 2>/dev/null || true)
   rode '$MOJ_TOOL update' e '$MOJ_TOOL login <cid>' de novo."
   fi
+  if [[ "$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)" == author_treino_only ]]; then
+    msg="$msg
+  autoria de problema só com a sessão do TREINO: rode '$MOJ_TOOL update' e '$MOJ_TOOL login' (sem MOJ_CONTEST)."
+  fi
   if [[ "$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)" == ua_gate ]]; then
     msg="$msg
   este contest só aceita o navegador da imagem da sede. Rode a CLI NA MÁQUINA DE PROVA (ela lê o

@@ -57,7 +57,7 @@ the layer. When you run from the repository, each script loads `lib/core.sh` dir
 | `MOJ_URL` | server address. Default: `https://moj.naquadah.com.br` |
 | `EDITOR` | text editor for `moj edit` |
 | `MOJ_CONFIG_DIR` | folder of the token and the cache |
-| `MOJ_CONTEST` | the target contest. It works as `-c` in `moj-contest` and `moj-comp` |
+| `MOJ_CONTEST` | the target contest. It works as `-c` in `moj-contest` and `moj-comp`; `moj` ignores it (authoring always runs in the treino) |
 | `MOJ_HOST` | `Host` header. Use it for local tests |
 | `MOJ_NO_CACHE=1` | disables the local cache |
 | `MOJ_UA_FILE`, `MOJ_USER_AGENT` | extra User-Agent. See the note below |

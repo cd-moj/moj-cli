@@ -103,6 +103,11 @@ _MOJ_LIB="$(cd "$(dirname "$_moj_self")" && pwd)/lib/core.sh"
 source "$_MOJ_LIB"
 # @INLINE-END
 
+# AUTORIA É ATIVIDADE DO TREINO: o servidor só responde /problems e /orgs numa sessão do treino (403
+# author_treino_only). O MOJ_CONTEST é do moj-contest e do moj-comp — exportado no shell, levava o `moj`
+# a logar no contest errado e todo comando de autoria falhava. Mesmo molde do moj-judges.
+CONTEST=treino
+
 # ---- pacote <-> JSON (fidelidade total) ---------------------------------------------------
 # _pairs <dir> <sample|hidden> <outfile> — escreve NDJSON (1 objeto/linha) em <outfile>.
 # Cada item sai via `jq --rawfile` (lê o teste de ARQUIVO) -> nada de conteúdo de teste no argv;

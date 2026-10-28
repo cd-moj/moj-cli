@@ -58,7 +58,7 @@ e da camada. Quando você roda do repositório, cada script carrega `lib/core.sh
 | `MOJ_URL` | endereço do servidor. Default: `https://moj.naquadah.com.br` |
 | `EDITOR` | editor de texto do `moj edit` |
 | `MOJ_CONFIG_DIR` | pasta do token e do cache |
-| `MOJ_CONTEST` | o contest alvo. Vale como `-c` no `moj-contest` e no `moj-comp` |
+| `MOJ_CONTEST` | o contest alvo. Vale como `-c` no `moj-contest` e no `moj-comp`; o `moj` o ignora (autoria é sempre no treino) |
 | `MOJ_HOST` | cabeçalho `Host`. Use em teste local |
 | `MOJ_NO_CACHE=1` | desliga o cache local |
 | `MOJ_UA_FILE`, `MOJ_USER_AGENT` | User-Agent extra. Ver a nota abaixo |
