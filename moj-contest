@@ -76,7 +76,7 @@
 #       e recusa se alguém mudou as sedes desde o seu `get`. `--dry-run` mostra o que muda sem gravar.
 #       `assign` num membro de time grava no TIME. Inscrito fica no roster (sobrevive à inscrição).
 #       CSV de `assign --csv`: uma linha `login,sede` (sede vazia = tira).
-#   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD]
+#   moj-contest -c <cid> sessions | dashboard | score | report [arquivo] | audit [n] | access [AAAA-MM-DD] (logins + recusas)
 #   moj-contest -c <cid> news ls | add <título> [texto] | rm <id>
 #   moj-contest -c <cid> rounds ls | add <slug> --name N --start <epoch|+90m|"AAAA-MM-DD HH:MM"> --end <…>
 #                       [--freeze <…>] [--kind warmup|official|extra]
@@ -643,8 +643,15 @@ cmd_report(){ need_contest; need_login   # relatório estático da prova (tar.gz
   echo "relatório: $outf ($(wc -c <"$outf" | tr -d '[:space:]') bytes) — extraia e abra o index.html"; }
 cmd_audit(){ need_contest; need_login; local n="${1:-30}"
   api GET "/contest/admin/audit-log$(qc)&limit=$(enc "$n")" | out '.events[]? | "\(.time|todate)\t\(.kind)\t\(.who//"")\t\(.action//"")\t\(.details//"")"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
-cmd_access(){ need_contest; need_login; local day="${1:-$(date +%F)}"
-  api GET "/contest/admin/access-log$(qc)&day=$(enc "$day")" | out '.entries[]? | "\(.time|todate)\t\(.login//"")\t\(.ip//"")"' | { column -t -s$'\t' 2>/dev/null || cat; }; }
+cmd_access(){ need_contest; need_login; local day="${1:-$(date +%F)}" r
+  r="$(api GET "/contest/admin/access-log$(qc)&day=$(enc "$day")")" || return 1
+  out '.entries[]? | "\(.time|todate)\t\(.login//"")\t\(.ip//"")"' <<<"$r" | { column -t -s$'\t' 2>/dev/null || cat; }
+  # tentativas RECUSADAS do dia (servidor novo; login "?" = conta inexistente — o texto digitado não é gravado)
+  [[ "$RAW" == 1 ]] && return 0
+  [[ "$(jq -r '(.refused // []) | length' <<<"$r" 2>/dev/null)" =~ ^[1-9] ]] || return 0
+  echo; echo "tentativas recusadas:"
+  jq -r '.refused[] | "\(.time|todate)\t\(if (.login//"") == "" then "?" else .login end)\t\(.code//"")\t\(.ip//"")"' <<<"$r" \
+    | { column -t -s$'\t' 2>/dev/null || cat; }; }
 cmd_news(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
   case "$sub" in
     ls) api GET "/contest/news$(qc)" | out '.items[]? | "\(.id)\t\(.date|todate)\t\(.title)"' | { column -t -s$'\t' 2>/dev/null || cat; };;
