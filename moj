@@ -671,6 +671,8 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
   # (sem tl_clock): nada
   jq -r "$_RDY_JQ"'if .tl_clock == "cpu" then "  relógio do TL: CPU (user+sys) — o TL acima é tempo de CPU; a parede é só um teto maior"
     + (if (.wall_tl | type) == "number" then " (WALLTL=\(.wall_tl | n0)s)" else "" end) else empty end' <<<"$tt" 2>/dev/null || true
+  # TL ÚNICO (TLUNIFIED do conf): o TL acima é o mesmo em toda linguagem. Servidor anterior (sem tl_unified): nada
+  jq -r 'if .tl_unified == true then "  TL único: o mesmo em todas as linguagens (o maior entre elas)" else empty end' <<<"$tt" 2>/dev/null || true
   # TLOVERRIDE do conf: o autor mandou no TL — o exibido acima JÁ é o efetivo
   jq -r 'if (.tl_override // {}) != {} then "  ⚙ TL OVERRIDE no conf (vence o calibrado): " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else empty end' <<<"$tt" 2>/dev/null
   # TLMOD sum/mult do conf: o juiz soma/multiplica por cima do calibrado — o exibido acima JÁ inclui (servidor
@@ -705,6 +707,8 @@ cmd_calib(){ need_login; id_arg '' "$@"
             + " — o do conf; a calibração mede os dois métodos"
             + ((.time_limits // {} | tls) as $t | if $t == "" then "" else "\n  TL (máx entre juízes): \($t)" end)
             + ((((.time_limits_by_method // {})[$o] // {}).effective // {} | tls) as $t | if $t == "" then "" else " · pelo \($o | mname): \($t)" end) end) +
+         # TL ÚNICO: o TL efetivo é o mesmo em toda linguagem (o maior entre elas)
+         (if .tl_unified == true then "\n  TL único: o mesmo em todas as linguagens (o maior entre elas; a tabela dos juízes segue por linguagem)" else "" end) +
          # RELÓGIO do TL: no cpu os tempos medidos (e o W) são de CPU (user+sys)
          (if .tl_clock == "cpu" then "\n  relógio do TL: CPU (user+sys) — os tempos abaixo são de CPU; a parede é só um teto maior"
             + (if (.wall_tl | type) == "number" then " (WALLTL=\(.wall_tl | n0)s)" else "" end) else "" end) +
@@ -975,6 +979,7 @@ gate(){ local d="$1" ok=1
   function_conf_gate "$d" || ok=0
   tlmethod_conf_gate "$d" || ok=0
   tlclock_conf_gate "$d" || ok=0
+  tlunified_conf_gate "$d" || ok=0
   [[ $ok -eq 1 ]]; }
 # _num_in <v> <min> <max> [x] — v é número decimal com ponto em [min, max] (com x: min exclusivo). awk com
 # LC_ALL=C: no pt_BR o mawk lê "0.5" como 0.
@@ -997,6 +1002,11 @@ tlclock_conf_gate(){ local d="$1" ok=1 v k
   [[ "$v" == cpu ]] && { k="$(_tlm_cv "$d" CPUNEEDED)"; [[ "$k" =~ ^[0-9]+$ && "$k" -gt 1 ]] && { echo "  ⚠ TLCLOCK=cpu com CPUNEEDED=$k: problema paralelo precisa do relógio de parede (o CPU soma as threads)" >&2; ok=0; }; }
   v="$(_tlm_cv "$d" WALLTL)"; [[ -z "$v" ]] || _num_in "$v" 1 60 || { echo "  ⚠ WALLTL=$v inválido (número de 1 a 60)" >&2; ok=0; }
   [[ $ok -eq 1 ]]; }
+# tlunified_conf_gate <dir> — o TL ÚNICO (TLUNIFIED=y|n; cdmoj/docs/PACOTE.md "TL único"): a MESMA regra do
+# validate-problem.sh (conf_tlunified_sane), que reprova o pacote no servidor.
+tlunified_conf_gate(){ local v; v="$(_tlm_cv "$1" TLUNIFIED)"
+  [[ -z "$v" || "$v" == y || "$v" == n ]] || { echo "  ⚠ TLUNIFIED=$v inválido (y ou n)" >&2; return 1; }
+  return 0; }
 # function_conf_gate <dir> — FUNCTION_LANGS (submissão de função, cdmoj/docs/PACOTE.md): cada linguagem
 # listada precisa do driver scripts/<lang>/compile.sh (é ele que traz o main). A MESMA regra do
 # validate-problem.sh (conf_function_sane) — melhor saber antes de subir. Ids canônicos: py3 → py.
@@ -1850,6 +1860,9 @@ edit_conf(){ local d="$1"
     # RELÓGIO do TL (cdmoj/docs/PACOTE.md "Relógio do TL"): parede (o padrão) ou CPU, com a parede como teto maior
     local tc wt; tc="$(_tlm_cv "$d" TLCLOCK)"; wt="$(_tlm_cv "$d" WALLTL)"
     printf '  13) relógio do TL (TLCLOCK): %s   14) teto mínimo de parede (WALLTL): %s\n' "${tc:-wall}" "${wt:-—}"
+    # TL ÚNICO (cdmoj/docs/PACOTE.md "TL único"): o mesmo TL em toda linguagem, o maior entre elas
+    local tu; tu="$(_tlm_cv "$d" TLUNIFIED)"
+    printf '  15) TL único em todas as linguagens (TLUNIFIED): %s\n' "$([[ "$tu" == y ]] && echo sim || echo 'não (por linguagem)')"
     case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
       1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
       2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
@@ -1920,6 +1933,14 @@ edit_conf(){ local d="$1"
          if [[ -z "$w" ]]; then conf_set "$d" WALLTL ""; echo "  WALLTL removido. Mudar recalibra."
          elif _num_in "$w" 1 60; then conf_set "$d" WALLTL "$w"; echo "  WALLTL=$w: o teto de parede é o maior entre 3 × o TL, o teto de CPU + 1 s e ${w} s. Mudar recalibra."
          else echo "  valor inválido (número de 1 a 60)"; fi;;
+      15) local u; u="$(ask '  TL único — o mesmo tempo-limite em todas as linguagens, o maior entre elas (y/n; vazio = n): ' "${tu:-n}")"
+         u="$(printf '%s' "$u" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+         case "$u" in
+           y|s|sim) conf_set "$d" TLUNIFIED y
+              echo "  TLUNIFIED=y: o TL é o maior entre as linguagens (o do pior tempo entre todas as good). Mudar recalibra.";;
+           ""|n|nao|não) conf_set "$d" TLUNIFIED ""; echo "  TL por linguagem (o padrão). Mudar recalibra.";;
+           *) echo "  valor inválido (y ou n)";;
+         esac;;
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }

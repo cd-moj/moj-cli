@@ -106,9 +106,10 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
   recalibration. `13) TLCLOCK` selects the **time-limit clock**: `wall` (wall clock, the default) or `cpu`
   (CPU time). With `cpu`, the wall clock is only a larger ceiling. Do not use `cpu` in a parallel problem.
   `14) WALLTL` writes the minimum of that ceiling, in seconds. A change of the clock or of `WALLTL`
-  requires recalibration. It also allows raw editing of the file. Guides:
+  requires recalibration. `15) TLUNIFIED` turns on the **single TL**: the same time limit in every language, the
+  largest among them. A change of the single TL requires recalibration. It also allows raw editing of the file. Guides:
   `mojtools/docs/problema-paralelo.md`, `mojtools/docs/submissao-de-funcao.md` and `cdmoj/docs/PACOTE.md`
-  ("Time-limit methods" and "Time-limit clock").
+  ("Time-limit methods", "Time-limit clock" and "Single TL").
 - `9) Collections` marks the problem in existing collections. It also creates a new collection.
 
 ## `moj` commands
@@ -121,7 +122,7 @@ The menu shows the fields of the page. Type a number or a letter to edit a field
 | `moj info [<id>]` | Shows everything about the problem: owner, public, collections, validation, counts. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Creates the package skeleton in `./<prob>`. `<org>` is the org of the id `<org>#<prob>`. `<prob>` is a lowercase slug `[a-z0-9._-]`. The CLI rejects other formats and suggests the right one. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Downloads the whole package: statement, conf, examples, tests, solutions, `scripts/` and `tests/score`. | `moj clone apc#vetor1` |
-| `moj test [dir] [--run [sol]]` | Runs the local preflight. With `tests/score`, it checks the groups: distribution, orphan test, invalid line. It rejects an invalid `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST`/`TLMETHOD`/`KATTIS_*`/`TLCLOCK`/`WALLTL` (the server's rule). It rejects `TLCLOCK=cpu` with `CPUNEEDED` greater than 1. `--run` judges locally with mojtools. It requires Linux and bwrap. On a parallel problem it warns when the machine has fewer CPUs than `CPUNEEDED` (the time measured here is not a TL). | `moj test --run` |
+| `moj test [dir] [--run [sol]]` | Runs the local preflight. With `tests/score`, it checks the groups: distribution, orphan test, invalid line. It rejects an invalid `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST`/`TLMETHOD`/`KATTIS_*`/`TLCLOCK`/`WALLTL`/`TLUNIFIED` (the server's rule). It rejects `TLCLOCK=cpu` with `CPUNEEDED` greater than 1. `--run` judges locally with mojtools. It requires Linux and bwrap. On a parallel problem it warns when the machine has fewer CPUs than `CPUNEEDED` (the time measured here is not a TL). | `moj test --run` |
 | `moj push [dir] [--force] [--overwrite]` | Sends the package. It creates or edits the problem. The upload is complete, with `scripts/`. It refuses when the problem changed on the server after your last `clone`, `pull` or `push`. `--overwrite` sends over it. `--force` skips the preflight and the title check. It exits with 0 when the upload worked, also when nothing changed. It exits with 1 on any failure, always with a message. Invalid session: run `moj login`. | `moj push` |
 | `moj pull [dir] [--force]` | Brings the server changes into the folder: web editor or another author. It replaces only the package files. It refuses when the folder has changes that you did not send. `--force` copies the folder to `<folder>.local-YYYYMMDD-HHMMSS` and brings the server version. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnoses the environment · compares the build · updates the CLI. | `moj doctor` |

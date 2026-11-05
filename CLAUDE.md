@@ -82,6 +82,10 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   pré-voo (`gate` → `tlclock_conf_gate`) usa a regra do `validate-problem.sh` (`conf_tlclock_sane`), inclusive `cpu`
   com `CPUNEEDED>1`. `moj calib`/`moj check` dizem o relógio de CPU (`tl_clock`, `wall_tl` por `n0`); parede ou
   servidor antigo = a saída de antes. Teste: `test/tl-clock-conf.sh`.
+- **TL único (05/11/2026; `cdmoj/docs/PACOTE.md` "TL único")**: `moj edit → 8 → 15` grava `TLUNIFIED=y` (n/vazio tira a
+  linha) com `conf_set`, no FIM do conf (a linha entra no tl-checksum: ligar recalibra). Pré-voo `tlunified_conf_gate` (a
+  regra do `conf_tlunified_sane`). `moj check`/`calib` dizem "TL único" pelo `tl_unified` da resposta; o `unified` que vem
+  dentro do `tl_mods` não vira linha de TLMOD (o `tlmods` só lê `.sum`/`.mult`). Teste: `test/tl-unified-conf.sh`.
 - **Problema sem exemplo (`SAMPLE=no` no `conf`, 2026-09-23)**: o pré-voo (`gate`) exige `sample*` OU
   `SAMPLE=no` (`sample_off`, a mesma regra do mojtools `stmt_no_samples` e do editor web `sampleOff`);
   `moj preview` manda `examples:[]` com a flag (o servido não tem exemplos); `moj edit` → 8 → 6 liga e
