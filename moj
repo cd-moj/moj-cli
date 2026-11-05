@@ -768,6 +768,8 @@ cmd_calib(){ need_login; id_arg '' "$@"
          then "      pelo \($o | mname): \(.expect_alt | xgot)" else empty end),
         ((.tests // [])[] | "    \(.name): " + (if has("code_alt") then "\($rm | mname) " else "" end)
            + "\(.code)  \(.time // "?")s  (tl \(.tl // "?")s)"
+           # relógio de CPU: o teste morreu pelo teto de PAREDE (o tempo é o CPU, que pode ser pequeno)
+           + (if .wall == true then " · parede" else "" end)
            + (if has("code_alt") then "   · \($rm | mother | mname) \(.code_alt) (tl \(.tl_alt // "?")s)" else "" end)))
      else "  (este juiz ainda não reportou o vetor estruturado — veja o log: moj --json calib)" end),
     (if (.stale | not) and .validator != null then

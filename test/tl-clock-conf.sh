@@ -66,7 +66,9 @@ need_login(){ :; }
 api(){ case "$2" in /problems/calib*) cat "$T/calib.json";; /problems/tl*) cat "$T/tl.json";;
   /problems/validation*) echo '{"ok":true,"checks":[]}';;
   /problems/status*) echo '{"problems":[{"ready":true,"pending":[],"sols":{"state":"ok"},"inputs":{"state":"none"}}]}';; esac; }
+jq -c '.hosts[0].sols = [{"file":"sleep.c","lang":"c","category":"slow","verdict":"Time Limit Exceeded,0p","method":"moj","tests":[{"name":"t1","code":"TLE","time":0.23,"tl":0.4,"wall":true},{"name":"t2","code":"AC","time":0.1,"tl":0.4}],"expect":{"state":"ok","why":"tle"}}]' "$T/calib.json" > "$T/x" && mv "$T/x" "$T/calib.json"
 out="$(cmd_calib 'col#pa' 2>&1)"
+ck "calib: o teste morto pela parede leva a marca; o outro não" '[[ "$out" == *"t1: TLE  0.23s  (tl 0.4s) · parede"* && "$out" == *"t2: AC  0.1s  (tl 0.4s)"* && "$out" != *"t2: AC  0.1s  (tl 0.4s) · parede"* ]]'
 ck "calib: o relógio de CPU e o WALLTL (8.0 sai 8 em todo jq)" '[[ "$out" == *"relógio do TL: CPU (user+sys) — os tempos abaixo são de CPU; a parede é só um teto maior (WALLTL=8s)"* ]]'
 out="$(cmd_check 'col#pa' 2>&1)"
 ck "check: o relógio de CPU"                    '[[ "$out" == *"relógio do TL: CPU (user+sys) — o TL acima é tempo de CPU; a parede é só um teto maior (WALLTL=8s)"* ]]'
