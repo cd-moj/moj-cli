@@ -103,9 +103,11 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
   editor do aluno abre vazio. `11) TLMETHOD` escolhe o **método do TL**: `moj` (o padrão) ou `kattis`.
   A calibração mede os dois métodos. Trocar o método não pede recalibração. `12)` grava os parâmetros do
   Kattis (`KATTIS_AC_TO_TIME_LIMIT`, `KATTIS_TIME_LIMIT_TO_TLE`, `KATTIS_TIME_RESOLUTION`). Mudar um
-  parâmetro pede recalibração. Também permite a edição bruta do arquivo. Guias:
-  `mojtools/docs/problema-paralelo.md`, `mojtools/docs/submissao-de-funcao.md` e
-  `cdmoj/docs/PACOTE.md` ("Métodos de TL").
+  parâmetro pede recalibração. `13) TLCLOCK` escolhe o **relógio do TL**: `wall` (parede, o padrão) ou
+  `cpu` (tempo de CPU). Com `cpu`, a parede é só um teto maior. Não use `cpu` em problema paralelo. `14)
+  WALLTL` grava o mínimo desse teto, em segundos. Mudar o relógio ou o `WALLTL` pede recalibração. Também
+  permite a edição bruta do arquivo. Guias: `mojtools/docs/problema-paralelo.md`,
+  `mojtools/docs/submissao-de-funcao.md` e `cdmoj/docs/PACOTE.md` ("Métodos de TL" e "Relógio do TL").
 - `9) Coleções` marca o problema em coleções existentes. Também cria uma coleção nova.
 
 ## Comandos do `moj`
@@ -118,7 +120,7 @@ O menu mostra os campos da página. Digite um número ou uma letra para editar u
 | `moj info [<id>]` | Mostra tudo do problema: dono, público, coleções, validação, contagens. | `moj info apc#vetor1` |
 | `moj new <org> <prob>` | Cria o esqueleto do pacote em `./<prob>`. `<org>` é a org do id `<org>#<prob>`. `<prob>` é um slug minúsculo `[a-z0-9._-]`. A CLI recusa outro formato e sugere o certo. | `moj new apc vetor1` |
 | `moj clone <id> [dir]` | Baixa o pacote inteiro: enunciado, conf, exemplos, testes, soluções, `scripts/` e `tests/score`. | `moj clone apc#vetor1` |
-| `moj test [dir] [--run [sol]]` | Faz o pré-voo local. Com `tests/score`, confere os grupos: distribuição, teste órfão, linha inválida. Reprova valor inválido de `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST`/`TLMETHOD`/`KATTIS_*` (a mesma regra do servidor). `--run` julga localmente com o mojtools. Exige Linux e bwrap. Num problema paralelo avisa quando a máquina tem menos CPUs que o `CPUNEEDED` (o tempo daqui não vale como TL). | `moj test --run` |
+| `moj test [dir] [--run [sol]]` | Faz o pré-voo local. Com `tests/score`, confere os grupos: distribuição, teste órfão, linha inválida. Reprova valor inválido de `CPUNEEDED`/`SAMENUMA`/`MAXPARALLELTESTS`/`ALLOWPARALLELTEST`/`TLMETHOD`/`KATTIS_*`/`TLCLOCK`/`WALLTL` (a mesma regra do servidor). Reprova `TLCLOCK=cpu` com `CPUNEEDED` maior que 1. `--run` julga localmente com o mojtools. Exige Linux e bwrap. Num problema paralelo avisa quando a máquina tem menos CPUs que o `CPUNEEDED` (o tempo daqui não vale como TL). | `moj test --run` |
 | `moj push [dir] [--force] [--overwrite]` | Envia o pacote. Cria ou edita o problema. O envio é completo, com `scripts/`. Recusa se o problema mudou no servidor depois do seu último `clone`, `pull` ou `push`. `--overwrite` envia por cima. `--force` pula o pré-voo e o título. Sai com 0 quando o envio deu certo, também quando nada mudou. Sai com 1 em qualquer falha, sempre com uma mensagem. Sessão inválida: rode `moj login`. | `moj push` |
 | `moj pull [dir] [--force]` | Traz para a pasta as mudanças do servidor: editor web ou outro autor. Troca só os arquivos do pacote. Recusa se a pasta tem mudanças suas que não foram enviadas. `--force` copia a pasta para `<pasta>.local-AAAAMMDD-HHMMSS` e traz a versão do servidor. | `moj pull` |
 | `moj doctor` · `moj version` · `moj update` | Diagnostica o ambiente · compara o build · atualiza a CLI. | `moj doctor` |

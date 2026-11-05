@@ -76,6 +76,12 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   JSON passa por `n0` antes de ir p/ o texto: o jq 1.7+ imprime o literal `2.0` como veio, o 1.6 imprime `2`.
   `moj test --run` grava as duas metades na tabela local. `conf_get`/`conf_set` leem a ÚLTIMA linha sem `\n`
   final (o `conf_set` a APAGAVA ao regravar). Teste: `test/tl-method-conf.sh`.
+- **Relógio do TL (05/11/2026; `cdmoj/docs/PACOTE.md` "Relógio do TL")**: `moj edit → 8 → 13` grava `TLCLOCK`
+  (wall|cpu; `wall` tira a linha e o `WALLTL` junto) com `conf_set` — NO FIM do conf, porque a linha fica DENTRO do
+  tl-checksum (o contrário do TLMETHOD: trocar recalibra); `→ 14` grava/limpa o `WALLTL` (1 a 60 s; só com `cpu`). O
+  pré-voo (`gate` → `tlclock_conf_gate`) usa a regra do `validate-problem.sh` (`conf_tlclock_sane`), inclusive `cpu`
+  com `CPUNEEDED>1`. `moj calib`/`moj check` dizem o relógio de CPU (`tl_clock`, `wall_tl` por `n0`); parede ou
+  servidor antigo = a saída de antes. Teste: `test/tl-clock-conf.sh`.
 - **Problema sem exemplo (`SAMPLE=no` no `conf`, 2026-09-23)**: o pré-voo (`gate`) exige `sample*` OU
   `SAMPLE=no` (`sample_off`, a mesma regra do mojtools `stmt_no_samples` e do editor web `sampleOff`);
   `moj preview` manda `examples:[]` com a flag (o servido não tem exemplos); `moj edit` → 8 → 6 liga e

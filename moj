@@ -667,6 +667,10 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
     | "  método do TL: \($m | mname)" + (if $m == "kattis" then " " + (.kattis | kpar) else "" end)
       + ((((.time_limits_by_method // {})[$o] // {}).effective // {}) | to_entries | map(select(.key != "default"))
          | if length == 0 then "" else " · pelo \($o | mname): " + (map("\(.key)=\(.value)s") | join(" ")) end)' <<<"$tt" 2>/dev/null || true
+  # RELÓGIO do TL (TLCLOCK do conf; cdmoj/docs/PACOTE.md "Relógio do TL"): só o de CPU se anuncia. Servidor anterior
+  # (sem tl_clock): nada
+  jq -r "$_RDY_JQ"'if .tl_clock == "cpu" then "  relógio do TL: CPU (user+sys) — o TL acima é tempo de CPU; a parede é só um teto maior"
+    + (if (.wall_tl | type) == "number" then " (WALLTL=\(.wall_tl | n0)s)" else "" end) else empty end' <<<"$tt" 2>/dev/null || true
   # TLOVERRIDE do conf: o autor mandou no TL — o exibido acima JÁ é o efetivo
   jq -r 'if (.tl_override // {}) != {} then "  ⚙ TL OVERRIDE no conf (vence o calibrado): " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else empty end' <<<"$tt" 2>/dev/null
   # TLMOD sum/mult do conf: o juiz soma/multiplica por cima do calibrado — o exibido acima JÁ inclui (servidor
@@ -701,6 +705,9 @@ cmd_calib(){ need_login; id_arg '' "$@"
             + " — o do conf; a calibração mede os dois métodos"
             + ((.time_limits // {} | tls) as $t | if $t == "" then "" else "\n  TL (máx entre juízes): \($t)" end)
             + ((((.time_limits_by_method // {})[$o] // {}).effective // {} | tls) as $t | if $t == "" then "" else " · pelo \($o | mname): \($t)" end) end) +
+         # RELÓGIO do TL: no cpu os tempos medidos (e o W) são de CPU (user+sys)
+         (if .tl_clock == "cpu" then "\n  relógio do TL: CPU (user+sys) — os tempos abaixo são de CPU; a parede é só um teto maior"
+            + (if (.wall_tl | type) == "number" then " (WALLTL=\(.wall_tl | n0)s)" else "" end) else "" end) +
          (if (.tl_override // {}) != {} then "\n  ⚙ TL OVERRIDE no conf: " + (.tl_override|to_entries|map("\(.key)=\(.value)s")|join(" ")) else "" end) +
          (((.tl_mods // {}) | tlmods) as $t | if $t != "" then "\n  ⚙ TLMOD no conf (já incluído no TL): " + $t else "" end) +
          (if ((.missing_langs // [])|length) > 0 then "\n  ⚠ good sem TL em: \(.missing_langs|join(", "))" else "" end)' <<<"$j"
@@ -965,6 +972,7 @@ gate(){ local d="$1" ok=1
   parallel_conf_gate "$d" || ok=0
   function_conf_gate "$d" || ok=0
   tlmethod_conf_gate "$d" || ok=0
+  tlclock_conf_gate "$d" || ok=0
   [[ $ok -eq 1 ]]; }
 # _num_in <v> <min> <max> [x] — v é número decimal com ponto em [min, max] (com x: min exclusivo). awk com
 # LC_ALL=C: no pt_BR o mawk lê "0.5" como 0.
@@ -978,6 +986,14 @@ tlmethod_conf_gate(){ local d="$1" ok=1 v
   v="$(_tlm_cv "$d" KATTIS_AC_TO_TIME_LIMIT)"; [[ -z "$v" ]] || _num_in "$v" 1 100 || { echo "  ⚠ KATTIS_AC_TO_TIME_LIMIT=$v inválido (número de 1 a 100)" >&2; ok=0; }
   v="$(_tlm_cv "$d" KATTIS_TIME_LIMIT_TO_TLE)"; [[ -z "$v" ]] || _num_in "$v" 1 100 || { echo "  ⚠ KATTIS_TIME_LIMIT_TO_TLE=$v inválido (número de 1 a 100)" >&2; ok=0; }
   v="$(_tlm_cv "$d" KATTIS_TIME_RESOLUTION)"; [[ -z "$v" ]] || _num_in "$v" 0 10 x || { echo "  ⚠ KATTIS_TIME_RESOLUTION=$v inválido (número maior que 0 e até 10)" >&2; ok=0; }
+  [[ $ok -eq 1 ]]; }
+# tlclock_conf_gate <dir> — o RELÓGIO do TL (TLCLOCK=wall|cpu) e o mínimo do teto de parede (WALLTL, 1 a 60 s;
+# cdmoj/docs/PACOTE.md "Relógio do TL"): a MESMA regra do validate-problem.sh (conf_tlclock_sane), que REPROVA o
+# pacote no servidor — inclusive o relógio de CPU num problema paralelo (CPUNEEDED > 1: o CPU soma as threads).
+tlclock_conf_gate(){ local d="$1" ok=1 v k
+  v="$(_tlm_cv "$d" TLCLOCK)"; [[ -z "$v" || "$v" == wall || "$v" == cpu ]] || { echo "  ⚠ TLCLOCK=$v inválido (wall ou cpu)" >&2; ok=0; }
+  [[ "$v" == cpu ]] && { k="$(_tlm_cv "$d" CPUNEEDED)"; [[ "$k" =~ ^[0-9]+$ && "$k" -gt 1 ]] && { echo "  ⚠ TLCLOCK=cpu com CPUNEEDED=$k: problema paralelo precisa do relógio de parede (o CPU soma as threads)" >&2; ok=0; }; }
+  v="$(_tlm_cv "$d" WALLTL)"; [[ -z "$v" ]] || _num_in "$v" 1 60 || { echo "  ⚠ WALLTL=$v inválido (número de 1 a 60)" >&2; ok=0; }
   [[ $ok -eq 1 ]]; }
 # function_conf_gate <dir> — FUNCTION_LANGS (submissão de função, cdmoj/docs/PACOTE.md): cada linguagem
 # listada precisa do driver scripts/<lang>/compile.sh (é ele que traz o main). A MESMA regra do
@@ -1829,6 +1845,9 @@ edit_conf(){ local d="$1"
     local tm ka kb kr; tm="$(_tlm_cv "$d" TLMETHOD)"; ka="$(_tlm_cv "$d" KATTIS_AC_TO_TIME_LIMIT)"
     kb="$(_tlm_cv "$d" KATTIS_TIME_LIMIT_TO_TLE)"; kr="$(_tlm_cv "$d" KATTIS_TIME_RESOLUTION)"
     printf '  11) método do TL (TLMETHOD): %s   12) parâmetros do Kattis: a=%s b=%s r=%s\n' "${tm:-moj}" "${ka:-2.0}" "${kb:-1.5}" "${kr:-1.0}"
+    # RELÓGIO do TL (cdmoj/docs/PACOTE.md "Relógio do TL"): parede (o padrão) ou CPU, com a parede como teto maior
+    local tc wt; tc="$(_tlm_cv "$d" TLCLOCK)"; wt="$(_tlm_cv "$d" WALLTL)"
+    printf '  13) relógio do TL (TLCLOCK): %s   14) teto mínimo de parede (WALLTL): %s\n' "${tc:-wall}" "${wt:-—}"
     case "$(ask '  nº p/ mudar, [b]ruto no editor, [v]oltar: ')" in
       1) conf_set "$d" 'TLMOD[calibrafactor]' "$(ask '  calibrafactor (ex 1.35 ou 1+1.35): ' "$(conf_get "$d" 'TLMOD[calibrafactor]')")";;
       2) conf_set "$d" 'ULIMITS[-u]' "$(ask '  ULIMITS[-u]: ' "$(conf_get "$d" 'ULIMITS[-u]')")";;
@@ -1881,6 +1900,24 @@ edit_conf(){ local d="$1"
            if [[ "$r" != "$kr" ]]; then conf_set "$d" KATTIS_TIME_RESOLUTION "$r"; fi
            echo "  parâmetros do Kattis gravados (vazio = o padrão). Mudar um parâmetro pede recalibração."
          else echo "  valor inválido: a e b de 1 a 100; r maior que 0 e até 10"; fi;;
+      13) local c; c="$(ask '  relógio do TL — wall (parede, o padrão) ou cpu (tempo de CPU; a parede vira um teto maior): ' "${tc:-wall}")"
+         c="$(printf '%s' "$c" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+         # dentro do tl-checksum (o contrário do TLMETHOD): trocar o relógio recalibra, então a linha vai no fim do conf
+         case "$c" in
+           ""|wall) conf_set "$d" TLCLOCK ""; conf_set "$d" WALLTL ""
+              echo "  relógio de parede: o TL é o tempo real do teste. Mudar recalibra.";;
+           cpu) conf_set "$d" TLCLOCK cpu
+              echo "  TLCLOCK=cpu: o TL é o tempo de CPU (user+sys); a parede é só um teto (3 × o TL, no mínimo o TL + 3,2 s)."
+              echo "  Mudar recalibra. Não serve a problema paralelo (CPUNEEDED > 1)."
+              tlclock_conf_gate "$d" || true;;
+           *) echo "  valor inválido (wall ou cpu)";;
+         esac;;
+      14) if [[ "${tc:-wall}" != cpu ]]; then echo "  o WALLTL só vale com o relógio de CPU (13 → cpu)"; continue; fi
+         local w; w="$(ask '  WALLTL — o mínimo do teto de parede, em segundos (1 a 60; vazio = só a regra 3 × TL / teto de CPU + 1 s): ' "$wt")"
+         w="${w//[[:space:]]/}"
+         if [[ -z "$w" ]]; then conf_set "$d" WALLTL ""; echo "  WALLTL removido. Mudar recalibra."
+         elif _num_in "$w" 1 60; then conf_set "$d" WALLTL "$w"; echo "  WALLTL=$w: o teto de parede é o maior entre 3 × o TL, o teto de CPU + 1 s e ${w} s. Mudar recalibra."
+         else echo "  valor inválido (número de 1 a 60)"; fi;;
       b) "$ED" "$d/conf" </dev/tty;;
       *) return;;
     esac; done; }
