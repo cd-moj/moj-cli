@@ -157,7 +157,8 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   local ef; for ef in docs/enunciado.md enunciado.md docs/enunciado.org docs/enunciado.tex; do [[ -f "$d/$ef" ]] && { enunf="$d/$ef"; case "$ef" in *.org) efmt=org;; *.tex) efmt=tex;; *) efmt=md;; esac; break; }; done
   # exemplos/testes/soluções vão p/ NDJSON em arquivos e entram via --slurpfile (jq lê o arquivo);
   # enun/editorial podem ser GRANDES (imagens coladas viram data:URI) -> --rawfile (arquivo). Nada
-  # de conteúdo grande por argumento de jq (era o ARG_MAX). conf é pequeno -> segue por --argjson.
+  # de conteúdo grande por argumento de jq (era o ARG_MAX). O conf também vai por --rawfile (06/11/2026): é conteúdo
+  # de arquivo, e TLOVERRIDE/TLMOD/comentários o fazem crescer; sem conf = /dev/null = "" (o `slurp` dava o mesmo).
   local t; t="$(mktemp -d)"
   _pairs "$d" sample "$t/exs"; _pairs "$d" hidden "$t/tss"
   _cat "$d" good "$t/good"; _cat "$d" slow "$t/slow"; _cat "$d" wrong "$t/wrong"; _cat "$d" pass "$t/pass"; _cat "$d" upcoming "$t/up"
@@ -186,7 +187,8 @@ pkg_to_json(){ local d="$1" enunf="" efmt=md
   local trflag=n trrt=n
   [[ "$(jq -r '.trans_rt//false' "$d/.moj-id" 2>/dev/null)" == true ]] && trrt=y
   { [[ -s "$t/trans" ]] || [[ "$trrt" == y ]]; } && trflag=y
-  jq -n --rawfile enun "$enf" --argjson conf "$(slurp "$d/conf")" --arg efmt "$efmt" \
+  local conff="$d/conf"; [[ -f "$conff" ]] || conff=/dev/null
+  jq -n --rawfile enun "$enf" --rawfile conf "$conff" --arg efmt "$efmt" \
         --arg author "$(head -1 "$d/author" 2>/dev/null || true)" \
         --argjson tags "$([[ -f "$d/tags" ]] && jq -R . "$d/tags" | jq -sc . || echo '[]')" \
         --arg title "$([[ -f "$d/.moj-id" ]] && jq -r '.title//""' "$d/.moj-id" || echo '')" \
@@ -621,8 +623,11 @@ cmd_check(){ need_login; id_arg '' "$@"; local id="$ID" vt ct tt st
   ct="$(api GET "/problems/calib?id=$(enc "$id")" 2>/dev/null)" || ct='{}'
   tt="$(api GET "/problems/tl?id=$(enc "$id")" 2>/dev/null)" || tt='{}'
   st="$(api GET "/problems/status?id=$(enc "$id")" 2>/dev/null)" || st='{}'
-  [[ "$RAW" == 1 ]] && { jq -cn --argjson v "$vt" --argjson c "$ct" --argjson t "$tt" --argjson s "$st" \
-    '{validation:$v, calib:$c, tl:$t, status:(($s.problems // [])[0] // null)}'; return; }
+  # as 4 respostas entram pelo STDIN (printf é builtin: sem teto de argv). Por `--argjson` o /problems/calib de um
+  # problema com muitas soluções × testes passava dos 128 KiB de UM argumento e o jq morria com "Argument list too
+  # long" (relato de 06/11/2026: a ferramenta do Roberto usa o `moj check --json`).
+  [[ "$RAW" == 1 ]] && { printf '%s\n%s\n%s\n%s\n' "$vt" "$ct" "$tt" "$st" \
+    | jq -cs '{validation:.[0], calib:.[1], tl:.[2], status:((.[3].problems // [])[0] // null)}'; return; }
   local validado calibrado recal miss bcal
   # PACOTE (era "validado"): a conferência ESTÁTICA do validate-problem.sh — não roda solução
   # nenhuma. Quem roda é a calibração: soluções e entradas vêm dela (linhas abaixo).

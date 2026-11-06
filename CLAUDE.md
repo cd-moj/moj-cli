@@ -128,7 +128,14 @@ Workspace multi-repo: ver `../CLAUDE.md`.
   **`--rawfile <arquivo>`** (helper `_b64tmp` em `lib/core.sh`), nunca por `--arg "$(…)"`. É a
   mesma classe do servidor (ver `cdmoj/CLAUDE.md`), e o guarda é `test/argmax.sh`, que roda os
   corpos de verdade com carga acima do teto **e** faz o inventário do padrão proibido nos quatro
-  executáveis.
+  executáveis. **RESPOSTA DA API TAMBÉM** (06/11/2026, relato do Roberto: "quebramos moj-cli por ter soluções
+  demais"): o `moj check --json` juntava as 4 respostas por `--argjson`, e o `/problems/calib` de um problema com
+  muitas soluções × testes passa de 128 KiB. Junte por STDIN (`printf '%s\n%s\n' "$a" "$b" | jq -s` — o `printf` é
+  builtin, sem teto) ou por arquivo. O inventário do argmax.sh reprova a variável que recebe a resposta CRUA de
+  `$(api …)`/`$(api_t …)` (sem `|` na linha) usada em `--arg`/`--argjson` no mesmo executável — nome repetido entre
+  ramos dá falso positivo: renomeie a resposta (foi o `st` → `rds` das rodadas). O `conf` do `pkg_to_json` também
+  vai por `--rawfile` (era `--argjson "$(slurp …)"`) e o `moj-contest` ganhou o `MOJ_CLI_LIB_ONLY=1` (testa o
+  `_tpl_merge`, a mescla do template, sem rede).
 - **PORTABILIDADE: a CLI roda na máquina do USUÁRIO, e ela pode ser um Mac.** O dev e o servidor
   são Linux, então flag só-GNU passa despercebida aqui e quebra lá — já aconteceu três vezes
   (o `awk` de locale abaixo, e o `base64` do `testrun`/`log`/`comp statement`, que veio por PR de

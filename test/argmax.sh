@@ -52,10 +52,67 @@ chk "docs text: jq monta o corpo"    '[[ -s "$T/tx.json" && ! -s "$T/tx.err" ]]'
 chk "docs text: texto chegou inteiro" \
   '[[ "$(jq -r ".cover_pt" "$T/tx.json" | wc -c)" -eq "$(wc -c < "$T/capa.md")" ]]'
 
+echo "== respostas grandes da API e arquivos grandes: o jq recebe pelo stdin/arquivo (06/11/2026) =="
+# Relato: "acho que quebramos moj-cli por ter soluções demais" — o `moj check --json` juntava as 4 respostas com
+# `--argjson`, e o /problems/calib de um problema com muitas soluções × testes passa dos 128 KiB de UM argumento.
+# Roda as funções REAIS (MOJ_CLI_LIB_ONLY=1), num subshell cada (o `moj` liga set -e).
+NS=3000   # ~3000 soluções no calib ≈ 400 KB
+jq -cn --argjson n "$NS" '{success:true, id:"col#pa", sols:[range($n) | {file:"s\(.).cpp", lang:"cpp", category:"good",
+  verdict:"Accepted,100p", tests:[range(4) | {name:"t\(.)", code:"AC", time:0.01}]}]}' > "$T/calib.json"
+chk "o calib de teste passa dos 128 KiB"   '(( $(wc -c < "$T/calib.json") > 131072 ))'
+( MOJ_CLI_LIB_ONLY=1 MOJ_CONFIG_DIR="$T/cfg" source "$CLI/moj" 2>/dev/null; set +e; set +o pipefail
+  need_login(){ :; }; RAW=1
+  api(){ case "$2" in /problems/calib*) cat "$T/calib.json";; /problems/status*) echo '{"problems":[{"ready":true}]}';;
+         *) echo '{"ok":true}';; esac; }
+  cmd_check 'col#pa' > "$T/check.json" 2>"$T/check.err" )
+chk "moj check --json: sem 'Argument list too long'" '! grep -q "Argument list" "$T/check.err"'
+chk "moj check --json: o calib chega inteiro"        '[[ "$(jq ".calib.sols | length" "$T/check.json" 2>/dev/null)" == "$NS" ]]'
+chk "moj check --json: o status é o 1º problema"     '[[ "$(jq -c .status "$T/check.json" 2>/dev/null)" == "{\"ready\":true}" ]]'
+# pkg_to_json: o conf é conteúdo de ARQUIVO (TLOVERRIDE/TLMOD/comentários o fazem crescer)
+P="$T/pkg"; mkdir -p "$P/docs" "$P/tests/input" "$P/tests/output" "$P/sols/good"
+printf '# x\n\n## Entrada\n\n## Saída\n' > "$P/docs/enunciado.md"; echo autor > "$P/author"
+printf '1\n' > "$P/tests/input/sample1"; printf '1\n' > "$P/tests/output/sample1"; printf 'int main(){}\n' > "$P/sols/good/a.c"
+printf '{"id":"o#p","repo":"o","prob":"p","title":"P"}' > "$P/.moj-id"
+{ echo 'CALIBRATIONTL=5'; for i in $(seq 1 4000); do echo "# linha de comentário $i do conf, com texto p/ engordar o arquivo"; done; } > "$P/conf"
+chk "o conf de teste passa dos 128 KiB"    '(( $(wc -c < "$P/conf") > 131072 ))'
+( MOJ_CLI_LIB_ONLY=1 MOJ_CONFIG_DIR="$T/cfg" source "$CLI/moj" 2>/dev/null; set +e; set +o pipefail
+  pkg_to_json "$P" > "$T/pkg.json" 2>"$T/pkg.err" )
+chk "pkg_to_json: sem 'Argument list too long'"      '! grep -q "Argument list" "$T/pkg.err"'
+chk "pkg_to_json: o conf chega inteiro"              '[[ "$(jq -j .conf_text "$T/pkg.json" 2>/dev/null | wc -c)" == "$(wc -c < "$P/conf")" ]]'
+rm -f "$P/conf"
+( MOJ_CLI_LIB_ONLY=1 MOJ_CONFIG_DIR="$T/cfg" source "$CLI/moj" 2>/dev/null; set +e; set +o pipefail
+  pkg_to_json "$P" > "$T/pkg0.json" 2>/dev/null )
+chk "pkg_to_json: sem conf = \"\" (como antes)"       '[[ "$(jq -c .conf_text "$T/pkg0.json" 2>/dev/null)" == "\"\"" ]]'
+# moj-contest create --template: o spec do template (esqueletos somam centenas de KB) mesclado ao spec
+jq -cn '{duration:7200, login_lead:600, freeze_before_end:3600, mode:"icpc",
+  modules:{esqueletos:{langs:{cpp:{mode:"custom", code:([range(9000)] | map("// linha de esqueleto") | join("\n"))}}}}}' > "$T/tpl.json"
+chk "o template de teste passa dos 128 KiB" '(( $(wc -c < "$T/tpl.json") > 131072 ))'
+( MOJ_CLI_LIB_ONLY=1 MOJ_CONFIG_DIR="$T/cfg" source "$CLI/moj-contest" 2>/dev/null; set +e; set +o pipefail
+  _tpl_merge "$(cat "$T/tpl.json")" '{"name":"Prova","id":"p1"}' 1000000 > "$T/merged.json" 2>"$T/merged.err" )
+chk "_tpl_merge: sem 'Argument list too long'"       '! grep -q "Argument list" "$T/merged.err"'
+chk "_tpl_merge: absolutiza e mescla (start/end/login_start/freeze, spec por cima)" \
+  '[[ "$(jq -c "[.start, .end, .login_start, .freeze, .name, .id, has(\"duration\")]" "$T/merged.json" 2>/dev/null)" == "[1000000,1007200,999400,1003600,\"Prova\",\"p1\",false]" ]]'
+chk "_tpl_merge: o módulo grande chega inteiro"      '[[ "$(jq -r ".modules.esqueletos.langs.cpp.code" "$T/merged.json" 2>/dev/null | wc -l)" == 9000 ]]'
+
 echo "== o padrão proibido não volta por outra porta =="
+# RESPOSTA CRUA DA API nunca vai por argv do jq: a variável que recebe `$(api …)`/`$(api_t …)` INTEIRA (sem `| jq` na
+# mesma atribuição — aí já é um pedaço pequeno) não pode aparecer como `--arg X "$var"`/`--argjson X "$var"` no mesmo
+# executável; use o stdin (`<<<"$var"`, `printf … | jq -s`) ou um arquivo. Comentário não conta. Os nomes se repetem
+# entre funções ($t, $end…), por isso só a resposta crua entra na lista.
+apiv=""
+for f in moj moj-contest moj-comp moj-judges; do
+  for v in $(cd "$CLI" && awk 'match($0, /[a-z_][a-z0-9_]*="\$\((api|api_t) /) && index(substr($0, RSTART), "|") == 0 {
+                 v = substr($0, RSTART, RLENGTH); sub(/=.*/, "", v); print v }' "$f" | sort -u); do
+    hit="$(cd "$CLI" && grep -nE -- "--arg(json)?[[:space:]]+[A-Za-z_]+[[:space:]]+\"\\\$$v\"" "$f" | grep -vE '^[0-9]+:[[:space:]]*#')"
+    [[ -n "$hit" ]] && apiv+="$f: \$$v → $hit"$'\n'
+  done
+done
+[[ -z "$apiv" ]] || printf '%s' "$apiv" | sed 's/^/     /'
+chk "nenhuma resposta da API por --arg/--argjson" '[[ -z "$apiv" ]]'
+
 # `--arg x "$(...)"` cujo valor vem de ARQUIVO é o que estoura. Assinaturas conhecidas:
 # _b64enc, cat, base64, xxd — e a variável que acabou de receber um `$(cat …)`.
-achados="$(cd "$CLI" && grep -nE -- '--arg[[:space:]]+[A-Za-z_]+[[:space:]]+"\$\((_b64enc|cat |base64|xxd)' \
+achados="$(cd "$CLI" && grep -nE -- '--arg(json)?[[:space:]]+[A-Za-z_]+[[:space:]]+"\$\((_b64enc|cat |base64|xxd|slurp |api |api_t )' \
              moj moj-contest moj-comp moj-judges lib/*.sh 2>/dev/null)"
 [[ -z "$achados" ]] || printf '%s\n' "$achados" | sed 's/^/     /'
 chk "nenhum --arg alimentado por arquivo" '[[ -z "$achados" ]]'

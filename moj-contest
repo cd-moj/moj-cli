@@ -173,6 +173,17 @@ cmd_whoami(){ need_contest; need_login
 # módulo que o servidor DESLIGOU na criação por faltar o pré-requisito (`modules_skipped`; hoje só o virtual, cujo
 # portão precisa do contest no disco) — sufixo do filtro de saída do create/duplicate
 JQ_SKIPPED=' + ((.modules_skipped // []) | map("\n  ⚠ módulo \(.id) ficou DESLIGADO: \(.message // .code) — ligue depois com: moj-contest -c <id> modules on \(.id)") | join(""))'
+# _tpl_merge <spec-do-template> <spec> <início> — absolutiza o template (duration/login_lead/freeze_before_end) e mescla
+# o spec por cima. Os dois JSON entram pelo STDIN (printf é builtin): por `--argjson` um template com módulos grandes
+# (esqueletos somam centenas de KB) passava dos 128 KiB de UM argumento — "Argument list too long" (06/11/2026).
+_tpl_merge(){
+  printf '%s\n%s\n' "$1" "$2" | jq -cs --argjson st "$3" '
+    .[0] as $t | .[1] as $s
+    | ($t + {start:$st, end:($st + ($t.duration // 10800))}) as $base
+    | ($base + (if $base.login_lead then {login_start:($st - $base.login_lead)} else {} end)
+             + (if $base.freeze_before_end then {freeze:($base.end - $base.freeze_before_end)} else {} end)
+       | del(.duration, .login_lead, .freeze_before_end)) + $s'
+}
 cmd_create(){ need_login_t
   local specf="" tpl="" id="" name="" start="" end="" empty=0 mods="" mode="" a
   while [[ $# -gt 0 ]]; do a="$1"; shift
@@ -198,12 +209,7 @@ cmd_create(){ need_login_t
   if [[ -n "$tpl" ]]; then
     local t st; t="$(api_t GET "/treino/contest-create/templates?name=$(enc "$tpl")" | jq -c '.template.spec // {}')"
     st="${start:-$(( ($(date +%s) / 3600 + 1) * 3600 ))}"
-    # absolutiza o template (duration/login_lead/freeze_before_end) e mescla o spec por cima
-    spec="$(jq -cn --argjson t "$t" --argjson s "$spec" --argjson st "$st" '
-      ($t + {start:$st, end:($st + ($t.duration // 10800))}) as $base
-      | ($base + (if $base.login_lead then {login_start:($st - $base.login_lead)} else {} end)
-               + (if $base.freeze_before_end then {freeze:($base.end - $base.freeze_before_end)} else {} end)
-         | del(.duration, .login_lead, .freeze_before_end)) + $s')"
+    spec="$(_tpl_merge "$t" "$spec" "$st")"
   fi
   # --mode vence o spec/template (como --id/--name). A mesma allowlist do servidor; `outro` é só de
   # admin e o servidor recusa com 403 — aqui a mensagem já diz os valores certos.
@@ -947,15 +953,15 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     promote)
       local force=false a
       for a in "$@"; do [[ "$a" == --force ]] && force=true; done
-      local st; st="$(api GET "/contest/admin/rounds$(qc)")"
-      local to; to="$(jq -r '.next // ""' <<<"$st")"
+      local rds; rds="$(api GET "/contest/admin/rounds$(qc)")"
+      local to; to="$(jq -r '.next // ""' <<<"$rds")"
       [[ -n "$to" ]] || die "nenhuma rodada planejada: crie com 'rounds add <slug> …' antes"
-      if [[ "$(jq -r '.promote_ready.ok' <<<"$st")" != true && "$force" != true ]]; then
+      if [[ "$(jq -r '.promote_ready.ok' <<<"$rds")" != true && "$force" != true ]]; then
         echo "a rodada no ar NÃO está pronta p/ ser promovida:" >&2
-        jq -r '.promote_ready.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$st" >&2
+        jq -r '.promote_ready.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$rds" >&2
         die "resolva os bloqueadores. --force passa por cima dos avisos, mas NÃO de no_next_round, freeze_locked (descongelar só a partir do fim geral + 1 min) e problem_denied"
       fi
-      echo "isto ARQUIVA a rodada '$(jq -r '.active' <<<"$st")' e ZERA o placar; '$to' entra no ar." >&2
+      echo "isto ARQUIVA a rodada '$(jq -r '.active' <<<"$rds")' e ZERA o placar; '$to' entra no ar." >&2
       local c; read -rp "confirme digitando o id do contest ($CONTEST): " c || true
       [[ "$c" == "$CONTEST" ]] || die "não confere — nada foi alterado."
       api POST "/contest/admin/rounds$(qc)" "$(jq -cn --arg t "$to" --argjson f "$force" '{action:"promote",to:$t,force:$f}')" \
@@ -963,11 +969,11 @@ cmd_rounds(){ need_contest; need_login; local sub="${1:-ls}"; shift || true
     undo)
       # desfaz a ÚLTIMA promoção: a rodada arquivada volta ao ar com tudo, a que entrou volta a planejada.
       # Só enquanto a rodada no ar não teve atividade nenhuma (o servidor confere e diz por quê).
-      local st; st="$(api GET "/contest/admin/rounds$(qc)")"
-      local fr to; fr="$(jq -r '.undo.from // ""' <<<"$st")"; to="$(jq -r '.undo.to // ""' <<<"$st")"
-      if [[ "$(jq -r '.undo.possible // false' <<<"$st")" != true ]]; then
+      local rds; rds="$(api GET "/contest/admin/rounds$(qc)")"
+      local fr to; fr="$(jq -r '.undo.from // ""' <<<"$rds")"; to="$(jq -r '.undo.to // ""' <<<"$rds")"
+      if [[ "$(jq -r '.undo.possible // false' <<<"$rds")" != true ]]; then
         echo "não dá para desfazer a última promoção:" >&2
-        jq -r '.undo.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$st" >&2
+        jq -r '.undo.blockers[]? | "  ⛔ \(.code): \(.detail)"' <<<"$rds" >&2
         die "nada foi alterado."
       fi
       echo "isto DESFAZ a promoção: '$fr' volta ao ar com tudo o que tinha e '$to' volta a planejada." >&2
@@ -1198,6 +1204,9 @@ int main(void){ for(;;); return 0; }')
   done
   rm -f "$hdrf"; }
 
+# MOJ_CLI_LIB_ONLY=1 + `source moj-contest`: só define as funções (como no `moj`; é como o test/argmax.sh exercita o
+# _tpl_merge sem rede). Executado normalmente, a variável não existe e nada muda.
+if [[ "${MOJ_CLI_LIB_ONLY:-0}" == 1 ]]; then return 0 2>/dev/null || exit 0; fi
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   login) cmd_login "$@";; logout) cmd_logout "$@";; whoami) cmd_whoami "$@";;
